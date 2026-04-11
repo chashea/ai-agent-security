@@ -1,0 +1,1032 @@
+﻿#Requires -Version 7.0
+
+<#
+.SYNOPSIS
+    Foundry infrastructure module — ARM helpers, Bicep deployment, Bot Services,
+    Teams packaging and catalog publishing.
+.DESCRIPTION
+    Extracted from the monolithic Foundry.psm1. Contains all infrastructure
+    operations that cannot be handled by the Python SDK: ARM resource
+    provisioning (via Bicep), Bot Services, Entra app registrations,
+    Teams declarative agent packages, and Teams app catalog publishing.
+#>
+
+$script:ArmApiVersion   = '2025-04-01-preview'
+$script:AppApiVersion    = '2025-10-01-preview'
+$script:ArmBase          = 'https://management.azure.com'
+
+# ─── Token Helpers ───────────────────────────────────────────────────────────
+
+function Get-FoundryArmToken {
+    [CmdletBinding()]
+    [OutputType([string])]
+    param()
+    $tok = (Get-AzAccessToken -ResourceUrl 'https://management.azure.com' -ErrorAction Stop).Token
+    if ($tok -is [System.Security.SecureString]) { return $tok | ConvertFrom-SecureString -AsPlainText }
+    return $tok
+}
+
+function Get-FoundryDataToken {
+    [CmdletBinding()]
+    [OutputType([string])]
+    param()
+    $tok = (Get-AzAccessToken -ResourceUrl 'https://ai.azure.com' -ErrorAction Stop).Token
+    if ($tok -is [System.Security.SecureString]) { return $tok | ConvertFrom-SecureString -AsPlainText }
+    return $tok
+}
+
+function Get-FoundryGraphToken {
+    [CmdletBinding()]
+    [OutputType([string])]
+    param()
+    $tok = (Get-AzAccessToken -ResourceUrl 'https://graph.microsoft.com' -ErrorAction Stop).Token
+    if ($tok -is [System.Security.SecureString]) { return $tok | ConvertFrom-SecureString -AsPlainText }
+    return $tok
+}
+
+# ─── ARM Helpers ─────────────────────────────────────────────────────────────
+
+function Invoke-ArmGet {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)] [string]$Uri,
+        [Parameter(Mandatory)] [string]$Token
+    )
+    $headers = @{ 'Authorization' = "Bearer $Token" }
+    $webResponse = Invoke-WebRequest -Uri $Uri -Method Get -Headers $headers `
+        -SkipHttpErrorCheck -ErrorAction Stop
+    $statusCode = [int]$webResponse.StatusCode
+    if ($statusCode -eq 404) { return $null }
+    if ($statusCode -ge 400) { throw "ARM GET failed (HTTP $statusCode): $($webResponse.Content)" }
+    return ($webResponse.Content | ConvertFrom-Json)
+}
+
+function Invoke-ArmPut {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)] [string]$Uri,
+        [Parameter(Mandatory)] [string]$Body,
+        [Parameter(Mandatory)] [string]$Token,
+        [Parameter()] [switch]$Async
+    )
+    $headers = @{ 'Authorization' = "Bearer $Token"; 'Content-Type' = 'application/json' }
+    $webResponse = Invoke-WebRequest -Uri $Uri -Method Put -Headers $headers -Body $Body `
+        -SkipHttpErrorCheck -ErrorAction Stop
+    $statusCode = [int]$webResponse.StatusCode
+    if ($statusCode -ge 400) { throw "ARM PUT failed (HTTP $statusCode): $($webResponse.Content)" }
+
+    $parsed = if ($webResponse.Content) { try { $webResponse.Content | ConvertFrom-Json } catch { $null } } else { $null }
+
+    if ($Async -and $statusCode -in @(201, 202)) {
+        $asyncUrl = $null
+        if ($webResponse.Headers['Azure-AsyncOperation']) {
+            $asyncUrl = [string]($webResponse.Headers['Azure-AsyncOperation'] | Select-Object -First 1)
+        }
+        elseif ($webResponse.Headers['Location']) {
+            $asyncUrl = [string]($webResponse.Headers['Location'] | Select-Object -First 1)
+        }
+        if ($asyncUrl) { Wait-ArmAsyncOperation -OperationUrl $asyncUrl -Token $Token }
+    }
+    return $parsed
+}
+
+function Invoke-ArmDelete {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)] [string]$Uri,
+        [Parameter(Mandatory)] [string]$Token,
+        [Parameter()] [switch]$Async
+    )
+    $headers = @{ 'Authorization' = "Bearer $Token" }
+    $webResponse = Invoke-WebRequest -Uri $Uri -Method Delete -Headers $headers `
+        -SkipHttpErrorCheck -ErrorAction Stop
+    $statusCode = [int]$webResponse.StatusCode
+    if ($statusCode -eq 404) { return }
+    if ($statusCode -ge 400) { throw "ARM DELETE failed (HTTP $statusCode): $($webResponse.Content)" }
+
+    if ($Async -and $statusCode -eq 202) {
+        $asyncUrl = $null
+        if ($webResponse.Headers['Azure-AsyncOperation']) {
+            $asyncUrl = [string]($webResponse.Headers['Azure-AsyncOperation'] | Select-Object -First 1)
+        }
+        elseif ($webResponse.Headers['Location']) {
+            $asyncUrl = [string]($webResponse.Headers['Location'] | Select-Object -First 1)
+        }
+        if ($asyncUrl) { Wait-ArmAsyncOperation -OperationUrl $asyncUrl -Token $Token }
+    }
+}
+
+function Wait-ArmAsyncOperation {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)] [string]$OperationUrl,
+        [Parameter(Mandatory)] [string]$Token
+    )
+    $headers     = @{ 'Authorization' = "Bearer $Token" }
+    $maxAttempts = 40   # 40 x 15s = 10 min
+    for ($i = 1; $i -le $maxAttempts; $i++) {
+        Start-Sleep -Seconds 15
+        $opResponse = Invoke-WebRequest -Uri $OperationUrl -Method Get -Headers $headers `
+            -SkipHttpErrorCheck -ErrorAction Stop
+        $opBody     = try { $opResponse.Content | ConvertFrom-Json } catch { $null }
+        $httpStatus = [int]$opResponse.StatusCode
+
+        if ($httpStatus -in @(200, 204) -and (-not $opBody -or
+            (-not $opBody.PSObject.Properties['status'] -and -not $opBody.PSObject.Properties['provisioningState']))) {
+            Write-LabLog -Message "ARM async polling... status: Succeeded (HTTP $httpStatus, attempt $i/$maxAttempts)" -Level Info
+            return
+        }
+        $status = if ($opBody) {
+            if ($opBody.PSObject.Properties['status']) { [string]$opBody.status }
+            elseif ($opBody.PSObject.Properties['provisioningState']) { [string]$opBody.provisioningState }
+            else { 'Unknown' }
+        } else { 'Unknown' }
+        Write-LabLog -Message "ARM async polling... status: $status (attempt $i/$maxAttempts)" -Level Info
+        if ($status -eq 'Succeeded') { return }
+        if ($status -in @('Failed', 'Canceled')) {
+            $errorMsg = if ($opBody -and $opBody.PSObject.Properties['error']) { $opBody.error | ConvertTo-Json -Compress } else { $opResponse.Content }
+            throw "ARM async operation $status`: $errorMsg"
+        }
+    }
+    throw "ARM async operation did not complete within $($maxAttempts * 15) seconds."
+}
+
+# ─── Bicep Deployment ────────────────────────────────────────────────────────
+
+function Deploy-FoundryBicep {
+    [CmdletBinding(SupportsShouldProcess)]
+    [OutputType([PSCustomObject])]
+    param(
+        [Parameter(Mandatory)] [PSCustomObject]$Config
+    )
+
+    $fw             = $Config.workloads.foundry
+    $subscriptionId = [string]$fw.subscriptionId
+    $resourceGroup  = [string]$fw.resourceGroup
+    $location       = [string]$fw.location
+    $accountName    = [string]$fw.accountName
+    $projectName    = [string]$fw.projectName
+    $modelDeploy    = [string]$fw.modelDeploymentName
+
+    $bicepFile = Join-Path $PSScriptRoot '..' 'infra' 'foundry-core.bicep'
+
+    $projectEndpoint = "https://$accountName.services.ai.azure.com/api/projects/$projectName"
+
+    if (-not $PSCmdlet.ShouldProcess("Foundry Bicep '$resourceGroup'", 'Deploy')) {
+        return [PSCustomObject]@{
+            accountId          = $null
+            projectId          = $null
+            projectEndpoint    = $projectEndpoint
+            accountName        = $accountName
+            accountPrincipalId = $null
+        }
+    }
+
+    # ── Phase 1: Bicep for account, models, eval infra ────────────────────────
+    Write-LabLog -Message "Deploying Bicep: foundry-core.bicep -> $resourceGroup" -Level Info
+
+    $deployOutput = az deployment sub create `
+        --location $location `
+        --template-file $bicepFile `
+        --parameters location=$location `
+                     resourceGroupName=$resourceGroup `
+                     accountName=$accountName `
+                     projectName=$projectName `
+                     modelDeploymentName=$modelDeploy `
+        --subscription $subscriptionId `
+        --output json 2>&1
+
+    if ($LASTEXITCODE -ne 0) {
+        throw "Bicep deployment failed: $deployOutput"
+    }
+
+    $deployResult = $deployOutput | ConvertFrom-Json
+    $outputs      = $deployResult.properties.outputs
+
+    Write-LabLog -Message "Bicep complete: account=$accountName, models deployed." -Level Success
+
+    # ── Phase 2: Create project via direct ARM REST (not Bicep) ───────────────
+    # Project creation uses direct REST with async polling and retry because the
+    # CognitiveServices project resource provider has transient failures that
+    # require retry logic not available in Bicep templates.
+    Write-LabLog -Message "Creating Foundry project: $projectName (direct ARM REST)" -Level Info
+
+    $armToken    = Get-FoundryArmToken
+    $accountPath = "$($script:ArmBase)/subscriptions/$subscriptionId/resourceGroups/$resourceGroup/providers/Microsoft.CognitiveServices/accounts/$accountName"
+    $projectUri  = "$accountPath/projects/$projectName`?api-version=$($script:ArmApiVersion)"
+    $projectId   = $null
+
+    # Check if project already exists
+    $existingProject = Invoke-ArmGet -Uri $projectUri -Token $armToken
+
+    # If project is in Failed state, delete and recreate
+    if ($existingProject -and
+        $existingProject.PSObject.Properties['properties'] -and
+        $existingProject.properties.PSObject.Properties['provisioningState'] -and
+        [string]$existingProject.properties.provisioningState -eq 'Failed') {
+        Write-LabLog -Message "Project '$projectName' is in Failed state — deleting and recreating." -Level Warning
+        Invoke-ArmDelete -Uri $projectUri -Token $armToken -Async
+        Start-Sleep -Seconds 15
+        $existingProject = $null
+    }
+
+    if ($existingProject -and [string]$existingProject.properties.provisioningState -eq 'Succeeded') {
+        Write-LabLog -Message "Project already exists: $projectName" -Level Info
+        $projectId = [string]$existingProject.id
+    }
+    else {
+        # Create with retry (transient 500s from the RP)
+        $projectBody = @{
+            location   = $location
+            properties = @{ description = 'AI Agent Security — deployed by ai-agent-security' }
+        } | ConvertTo-Json -Depth 5 -Compress
+
+        $maxRetries = 6
+        for ($attempt = 1; $attempt -le $maxRetries; $attempt++) {
+            try {
+                $createdProject = Invoke-ArmPut -Uri $projectUri -Body $projectBody -Token $armToken -Async
+                $projectId = if ($createdProject -and $createdProject.PSObject.Properties['id']) {
+                    [string]$createdProject.id
+                } else { $null }
+                Write-LabLog -Message "Created Foundry project: $projectName" -Level Success
+                break
+            }
+            catch {
+                if ($attempt -lt $maxRetries) {
+                    Write-LabLog -Message "Project creation attempt $attempt/$maxRetries failed: $($_.Exception.Message). Retrying in 30s..." -Level Warning
+                    Start-Sleep -Seconds 30
+                    $armToken = Get-FoundryArmToken  # Refresh token
+                }
+                else {
+                    throw "Project creation failed after $maxRetries attempts: $($_.Exception.Message)"
+                }
+            }
+        }
+    }
+
+    $result = [PSCustomObject]@{
+        accountId          = [string]$outputs.accountId.value
+        projectId          = $projectId
+        projectEndpoint    = [string]$outputs.projectEndpoint.value
+        accountName        = [string]$outputs.accountName.value
+        accountPrincipalId = [string]$outputs.accountPrincipalId.value
+        aiSearchEndpoint   = if ($outputs.PSObject.Properties['aiSearchEndpoint']) { [string]$outputs.aiSearchEndpoint.value } else { $null }
+    }
+
+    Write-LabLog -Message "Foundry infrastructure complete: account=$accountName, project=$projectName" -Level Success
+    return $result
+}
+
+function Remove-FoundryBicep {
+    [CmdletBinding(SupportsShouldProcess)]
+    param(
+        [Parameter(Mandatory)] [PSCustomObject]$Config,
+        [Parameter()] [PSCustomObject]$Manifest,
+        [Parameter(Mandatory)] [string]$ArmToken
+    )
+
+    $fw             = $Config.workloads.foundry
+    $subscriptionId = if ($Manifest -and $Manifest.PSObject.Properties['subscriptionId']) { [string]$Manifest.subscriptionId } else { [string]$fw.subscriptionId }
+    $resourceGroup  = if ($Manifest -and $Manifest.PSObject.Properties['resourceGroup']) { [string]$Manifest.resourceGroup }  else { [string]$fw.resourceGroup }
+    $accountName    = [string]$fw.accountName
+    $projectName    = [string]$fw.projectName
+    $modelDeploy    = [string]$fw.modelDeploymentName
+
+    if (-not $PSCmdlet.ShouldProcess("Foundry infrastructure '$resourceGroup'", 'Remove')) { return }
+
+    $rgPath      = "$($script:ArmBase)/subscriptions/$subscriptionId/resourceGroups/$resourceGroup"
+    $accountPath = "$rgPath/providers/Microsoft.CognitiveServices/accounts/$accountName"
+
+    # Delete project, model, account, then resource group
+    foreach ($step in @(
+        @{ Name = "project: $projectName";     Uri = "$accountPath/projects/$projectName`?api-version=$($script:ArmApiVersion)" }
+        @{ Name = "model: $modelDeploy";        Uri = "$accountPath/deployments/$modelDeploy`?api-version=$($script:ArmApiVersion)" }
+        @{ Name = "account: $accountName";       Uri = "$accountPath`?api-version=$($script:ArmApiVersion)" }
+        @{ Name = "resource group: $resourceGroup"; Uri = "$rgPath`?api-version=2021-04-01" }
+    )) {
+        Write-LabLog -Message "Removing $($step.Name)" -Level Info
+        try {
+            Invoke-ArmDelete -Uri $step.Uri -Token $ArmToken -Async
+            Write-LabLog -Message "Removed $($step.Name)" -Level Success
+        }
+        catch {
+            Write-LabLog -Message "Error removing $($step.Name)`: $($_.Exception.Message)" -Level Warning
+        }
+    }
+}
+
+# ─── PNG Writer ──────────────────────────────────────────────────────────────
+
+function Initialize-PngWriter {
+    if (-not ([System.Management.Automation.PSTypeName]'Foundry.PngWriter').Type) {
+        Add-Type -Language CSharp -TypeDefinition @'
+using System;
+using System.IO;
+using System.IO.Compression;
+
+namespace Foundry {
+    public static class PngWriter {
+        static uint[] _crcTable;
+        static PngWriter() {
+            _crcTable = new uint[256];
+            for (uint n = 0; n < 256; n++) {
+                uint c = n;
+                for (int k = 0; k < 8; k++) {
+                    if ((c & 1) != 0) c = 0xEDB88320u ^ (c >> 1);
+                    else c >>= 1;
+                }
+                _crcTable[n] = c;
+            }
+        }
+        static uint Crc32(byte[] data, int offset, int length) {
+            uint crc = 0xFFFFFFFFu;
+            for (int i = offset; i < offset + length; i++)
+                crc = _crcTable[(crc ^ data[i]) & 0xFF] ^ (crc >> 8);
+            return crc ^ 0xFFFFFFFFu;
+        }
+        static uint Adler32(byte[] data) {
+            uint s1 = 1, s2 = 0;
+            foreach (byte b in data) { s1 = (s1 + b) % 65521; s2 = (s2 + s1) % 65521; }
+            return (s2 << 16) | s1;
+        }
+        static byte[] BigEndian4(uint v) {
+            return new byte[] { (byte)(v >> 24), (byte)(v >> 16), (byte)(v >> 8), (byte)v };
+        }
+        static void WriteChunk(Stream out_, byte[] type, byte[] data) {
+            byte[] lenBytes = BigEndian4((uint)data.Length);
+            out_.Write(lenBytes, 0, 4); out_.Write(type, 0, 4); out_.Write(data, 0, data.Length);
+            byte[] crcInput = new byte[4 + data.Length];
+            Array.Copy(type, 0, crcInput, 0, 4); Array.Copy(data, 0, crcInput, 4, data.Length);
+            byte[] crcBytes = BigEndian4(Crc32(crcInput, 0, crcInput.Length));
+            out_.Write(crcBytes, 0, 4);
+        }
+        static readonly byte[,] FontH = {{1,0,0,0,1},{1,0,0,0,1},{1,1,1,1,1},{1,0,0,0,1},{1,0,0,0,1},{1,0,0,0,1},{1,0,0,0,1}};
+        static readonly byte[,] FontF = {{1,1,1,1,1},{1,0,0,0,0},{1,0,0,0,0},{1,1,1,1,0},{1,0,0,0,0},{1,0,0,0,0},{1,0,0,0,0}};
+        static readonly byte[,] FontI = {{1,1,1,1,1},{0,0,1,0,0},{0,0,1,0,0},{0,0,1,0,0},{0,0,1,0,0},{0,0,1,0,0},{1,1,1,1,1}};
+        static readonly byte[,] FontS = {{0,1,1,1,1},{1,0,0,0,0},{1,0,0,0,0},{0,1,1,1,0},{0,0,0,0,1},{0,0,0,0,1},{1,1,1,1,0}};
+        static readonly byte[,] FontA = {{0,0,1,0,0},{0,1,0,1,0},{1,0,0,0,1},{1,1,1,1,1},{1,0,0,0,1},{1,0,0,0,1},{1,0,0,0,1}};
+        static byte[,] GetGlyph(char c) {
+            switch (char.ToUpper(c)) {
+                case 'H': return FontH; case 'F': return FontF;
+                case 'I': return FontI; case 'S': return FontS;
+                case 'A': return FontA; default: return null;
+            }
+        }
+        public static void Write(string path, int size, byte r, byte g, byte b) {
+            WriteIcon(path, size, r, g, b, 0, 0, 0, '\0');
+        }
+        public static void WriteWithInitial(string path, int size,
+            byte bgR, byte bgG, byte bgB, byte fgR, byte fgG, byte fgB, char initial) {
+            WriteIcon(path, size, bgR, bgG, bgB, fgR, fgG, fgB, initial);
+        }
+        static void WriteIcon(string path, int size,
+            byte bgR, byte bgG, byte bgB, byte fgR, byte fgG, byte fgB, char initial) {
+            byte[,] glyph = (initial != '\0') ? GetGlyph(initial) : null;
+            int glyphW = 5, glyphH = 7;
+            int scale = (glyph != null) ? Math.Max(1, (int)(size * 0.55 / glyphW)) : 0;
+            int letterW = glyphW * scale, letterH = glyphH * scale;
+            int offX = (size - letterW) / 2, offY = (size - letterH) / 2;
+            int scanline = 1 + size * 3;
+            byte[] raw = new byte[size * scanline];
+            for (int y = 0; y < size; y++) {
+                int off = y * scanline; raw[off] = 0x00;
+                for (int x = 0; x < size; x++) {
+                    byte pr = bgR, pg = bgG, pb = bgB;
+                    if (glyph != null && x >= offX && x < offX + letterW && y >= offY && y < offY + letterH) {
+                        int gx = (x - offX) / scale; int gy = (y - offY) / scale;
+                        if (gx < glyphW && gy < glyphH && glyph[gy, gx] == 1) { pr = fgR; pg = fgG; pb = fgB; }
+                    }
+                    raw[off + 1 + x * 3 + 0] = pr; raw[off + 1 + x * 3 + 1] = pg; raw[off + 1 + x * 3 + 2] = pb;
+                }
+            }
+            byte[] compressed;
+            using (var comp = new MemoryStream()) {
+                comp.WriteByte(0x78); comp.WriteByte(0x9C);
+                using (var dfl = new DeflateStream(comp, CompressionLevel.Optimal, true)) { dfl.Write(raw, 0, raw.Length); }
+                uint adler = Adler32(raw);
+                byte[] adlerBytes = BigEndian4(adler);
+                comp.Write(adlerBytes, 0, 4);
+                compressed = comp.ToArray();
+            }
+            byte[] ihdr = new byte[13];
+            byte[] wb = BigEndian4((uint)size); Array.Copy(wb, 0, ihdr, 0, 4);
+            byte[] hb = BigEndian4((uint)size); Array.Copy(hb, 0, ihdr, 4, 4);
+            ihdr[8] = 8; ihdr[9] = 2; ihdr[10] = 0; ihdr[11] = 0; ihdr[12] = 0;
+            byte[] pngSig = new byte[] { 137, 80, 78, 71, 13, 10, 26, 10 };
+            byte[] typeIHDR = new byte[] { 73, 72, 68, 82 };
+            byte[] typeIDAT = new byte[] { 73, 68, 65, 84 };
+            byte[] typeIEND = new byte[] { 73, 69, 78, 68 };
+            using (var fs = File.Open(path, FileMode.Create, FileAccess.Write)) {
+                fs.Write(pngSig, 0, 8);
+                WriteChunk(fs, typeIHDR, ihdr);
+                WriteChunk(fs, typeIDAT, compressed);
+                WriteChunk(fs, typeIEND, new byte[0]);
+            }
+        }
+    }
+}
+'@
+    }
+}
+
+# ─── Teams Agent Package ────────────────────────────────────────────────────
+
+function New-FoundryAgentPackage {
+    [CmdletBinding(SupportsShouldProcess)]
+    param(
+        [Parameter(Mandatory)] [PSCustomObject]$Agent,
+        [Parameter(Mandatory)] [string]$Prefix,
+        [Parameter(Mandatory)] [PSCustomObject]$AgentConfig,
+        [Parameter(Mandatory)] [string]$OutputDir,
+        [Parameter(Mandatory)] [string]$TenantId
+    )
+
+    $agentName   = [string]$Agent.name
+    $shortName   = $agentName -replace "^$([regex]::Escape($Prefix))-", ''
+    $shortNameNH = $shortName -replace '-', ''
+
+    $description  = if ($AgentConfig.PSObject.Properties['description'] -and
+                        -not [string]::IsNullOrWhiteSpace([string]$AgentConfig.description)) {
+                        [string]$AgentConfig.description } else { $shortName }
+    $instructions = [string]$AgentConfig.instructions
+    $baseUrl      = if ($Agent.PSObject.Properties['baseUrl']) { [string]$Agent.baseUrl } else { '' }
+    $descShort    = if ($description.Length -le 80) { $description } else { $description.Substring(0, 77) + '...' }
+
+    $pkgDir  = Join-Path $OutputDir $shortName
+    $zipPath = Join-Path $OutputDir "$shortName.zip"
+    if (Test-Path $pkgDir)  { Remove-Item $pkgDir -Recurse -Force }
+    if (Test-Path $zipPath) { Remove-Item $zipPath -Force }
+    New-Item -ItemType Directory -Path $pkgDir -Force | Out-Null
+
+    # manifest.json
+    $teamsManifest = [ordered]@{
+        '$schema'       = 'https://developer.microsoft.com/json-schemas/teams/v1.19/MicrosoftTeams.schema.json'
+        manifestVersion = '1.19'; version = '1.0.0'; id = [string][System.Guid]::NewGuid()
+        developer       = [ordered]@{ name = 'Contoso'; websiteUrl = 'https://contoso.com'; privacyUrl = 'https://contoso.com/privacy'; termsOfUseUrl = 'https://contoso.com/terms' }
+        name            = [ordered]@{ short = $shortName; full = "$Prefix $shortName" }
+        description     = [ordered]@{ short = $descShort; full = "$description — powered by Microsoft Foundry + Purview AI Governance" }
+        icons           = [ordered]@{ color = 'color.png'; outline = 'outline.png' }
+        accentColor     = '#0078D4'
+        copilotAgents   = [ordered]@{ declarativeAgents = @([ordered]@{ id = $shortNameNH; file = 'declarativeAgent.json' }) }
+    }
+    $teamsManifest | ConvertTo-Json -Depth 10 | Set-Content -Path (Join-Path $pkgDir 'manifest.json') -Encoding UTF8
+
+    # declarativeAgent.json
+    $declAgent = [ordered]@{
+        '$schema' = 'https://developer.microsoft.com/json-schemas/copilot/declarative-agent/v1.4/schema.json'
+        version = 'v1.4'; name = $shortName; description = $description; instructions = $instructions
+        actions = @([ordered]@{ id = "${shortNameNH}API"; file = 'plugin.json' })
+    }
+    $declAgent | ConvertTo-Json -Depth 10 | Set-Content -Path (Join-Path $pkgDir 'declarativeAgent.json') -Encoding UTF8
+
+    # plugin.json
+    $plugin = [ordered]@{
+        '$schema' = 'https://developer.microsoft.com/json-schemas/copilot/plugin/v2.2/schema.json'
+        schema_version = 'v2.2'; name_for_human = $shortName; description_for_human = $description
+        namespace = $shortNameNH
+        functions = @([ordered]@{ name = "ask$shortNameNH"; description = "Ask $shortName a question" })
+        runtimes  = @([ordered]@{ type = 'OpenApi'; auth = [ordered]@{ type = 'None' }; spec = [ordered]@{ url = 'openapi.json' } })
+    }
+    $plugin | ConvertTo-Json -Depth 10 | Set-Content -Path (Join-Path $pkgDir 'plugin.json') -Encoding UTF8
+
+    # openapi.json
+    $authUrl  = "https://login.microsoftonline.com/$TenantId/oauth2/v2.0/authorize"
+    $tokenUrl = "https://login.microsoftonline.com/$TenantId/oauth2/v2.0/token"
+    $openapi = [ordered]@{
+        openapi = '3.0.1'
+        info    = [ordered]@{ title = $shortName; version = '1.0.0' }
+        servers = @(@{ url = $baseUrl })
+        paths   = [ordered]@{
+            '/responses' = [ordered]@{
+                post = [ordered]@{
+                    operationId = "ask$shortNameNH"; summary = "Ask $shortName a question"
+                    requestBody = [ordered]@{ required = $true; content = [ordered]@{ 'application/json' = [ordered]@{ schema = [ordered]@{ type = 'object'; required = @('input'); properties = [ordered]@{ input = [ordered]@{ type = 'string'; description = 'User question or prompt' } } } } } }
+                    responses   = [ordered]@{ '200' = [ordered]@{ description = 'Successful response'; content = [ordered]@{ 'application/json' = [ordered]@{ schema = [ordered]@{ type = 'object'; properties = [ordered]@{ output = [ordered]@{ type = 'array'; items = [ordered]@{ type = 'object' } }; status = [ordered]@{ type = 'string' } } } } } } }
+                    security    = @(@{ EntraOAuth = @() })
+                }
+            }
+        }
+        components = [ordered]@{
+            securitySchemes = [ordered]@{
+                EntraOAuth = [ordered]@{
+                    type = 'oauth2'
+                    flows = [ordered]@{
+                        authorizationCode = [ordered]@{ authorizationUrl = $authUrl; tokenUrl = $tokenUrl; scopes = [ordered]@{ 'https://cognitiveservices.azure.com/.default' = 'Access Azure AI services' } }
+                    }
+                }
+            }
+        }
+    }
+    $openapi | ConvertTo-Json -Depth 15 | Set-Content -Path (Join-Path $pkgDir 'openapi.json') -Encoding UTF8
+
+    # PNG icons
+    Initialize-PngWriter
+    $iconColors = @{
+        'HR' = @{ R = 16; G = 124; B = 16 }; 'Finance' = @{ R = 0; G = 120; B = 212 }
+        'IT' = @{ R = 216; G = 59; B = 1 };   'Sales'   = @{ R = 92; G = 45; B = 145 }
+    }
+    $iconKey   = ($shortName -split '-')[0]
+    $iconColor = if ($iconColors.ContainsKey($iconKey)) { $iconColors[$iconKey] } else { @{ R = 0; G = 120; B = 212 } }
+    $initial   = [char]$shortName[0]
+
+    [Foundry.PngWriter]::WriteWithInitial((Join-Path $pkgDir 'color.png'), 192,
+        [byte]$iconColor.R, [byte]$iconColor.G, [byte]$iconColor.B, [byte]255, [byte]255, [byte]255, $initial)
+    [Foundry.PngWriter]::WriteWithInitial((Join-Path $pkgDir 'outline.png'), 32,
+        [byte]255, [byte]255, [byte]255, [byte]$iconColor.R, [byte]$iconColor.G, [byte]$iconColor.B, $initial)
+
+    # Zip
+    Compress-Archive -Path (Join-Path $pkgDir '*') -DestinationPath $zipPath -Force
+    Remove-Item $pkgDir -Recurse -Force
+    return $zipPath
+}
+
+# ─── Bot Function Zip ────────────────────────────────────────────────────────
+
+function New-BotFunctionZip {
+    [CmdletBinding(SupportsShouldProcess)]
+    [OutputType([byte[]])]
+    param(
+        [Parameter(Mandatory)] [hashtable[]]$BotInfoList
+    )
+
+    $routeFuncs = foreach ($b in $BotInfoList) {
+        $envPrefix = switch ($b.routeName) {
+            'hr-helpdesk'     { 'HR' }
+            'finance-analyst' { 'FINANCE' }
+            'it-support'      { 'IT' }
+            'sales-research'  { 'SALES' }
+            default           { ($b.routeName -replace '-', '_').ToUpper() }
+        }
+        $funcName = $b.routeName -replace '-', '_'
+        @"
+
+
+@app.route(route="$($b.routeName)/messages", methods=["POST"])
+def ${funcName}(req: func.HttpRequest) -> func.HttpResponse:
+    return _handle_bot(req, os.environ.get("${envPrefix}_AGENT_URL", ""))
+"@
+    }
+    $routesBlock = $routeFuncs -join ''
+
+    $pyCode = @"
+import azure.functions as func
+import json
+import os
+import logging
+import asyncio
+import aiohttp
+from azure.identity.aio import ManagedIdentityCredential
+
+app = func.FunctionApp(http_auth_level=func.AuthLevel.ANONYMOUS)
+
+
+async def _call_foundry(agent_url: str, user_message: str) -> str:
+    async with ManagedIdentityCredential() as cred:
+        token = await cred.get_token("https://cognitiveservices.azure.com/.default")
+    headers = {
+        "Authorization": f"Bearer {token.token}",
+        "Content-Type": "application/json",
+    }
+    async with aiohttp.ClientSession() as session:
+        async with session.post(
+            f"{agent_url}/responses",
+            json={"input": user_message},
+            headers=headers,
+            ssl=True,
+        ) as resp:
+            data = await resp.json(content_type=None)
+    for item in data.get("output", []):
+        if item.get("type") == "message":
+            for c in item.get("content", []):
+                if c.get("type") == "output_text":
+                    return c.get("text", "")
+    return json.dumps(data)
+
+
+def _handle_bot(req: func.HttpRequest, agent_url: str) -> func.HttpResponse:
+    try:
+        body = req.get_json()
+        if body.get("type") == "message" and agent_url:
+            reply_text = asyncio.run(_call_foundry(agent_url, body.get("text", "")))
+            reply = {
+                "type": "message",
+                "text": reply_text,
+                "replyToId": body.get("id", ""),
+            }
+            return func.HttpResponse(
+                json.dumps(reply), mimetype="application/json", status_code=200
+            )
+        return func.HttpResponse(status_code=200)
+    except Exception as exc:
+        logging.error("Bot error: %s", exc)
+        return func.HttpResponse(status_code=500)
+$routesBlock
+"@
+
+    $hostJson = '{"version":"2.0","extensionBundle":{"id":"Microsoft.Azure.Functions.ExtensionBundle","version":"[4.*, 5.0.0)"}}'
+    $reqsTxt  = "azure-functions`r`nazure-identity`r`naiohttp`r`n"
+
+    if (-not $PSCmdlet.ShouldProcess('bot function zip', 'New')) { return [byte[]]@() }
+
+    $ms = [System.IO.MemoryStream]::new()
+    $za = [System.IO.Compression.ZipArchive]::new($ms, [System.IO.Compression.ZipArchiveMode]::Create, $true)
+    foreach ($pair in @(
+        @{ Name = 'host.json';        Content = $hostJson }
+        @{ Name = 'requirements.txt'; Content = $reqsTxt  }
+        @{ Name = 'function_app.py';  Content = $pyCode   }
+    )) {
+        $entry  = $za.CreateEntry($pair.Name)
+        $stream = $entry.Open()
+        $writer = [System.IO.StreamWriter]::new($stream, [System.Text.Encoding]::UTF8)
+        $writer.Write($pair.Content)
+        $writer.Flush(); $writer.Close(); $stream.Close()
+    }
+    $za.Dispose()
+    $ms.Seek(0, [System.IO.SeekOrigin]::Begin) | Out-Null
+    return $ms.ToArray()
+}
+
+# ─── Deploy Bot Services ────────────────────────────────────────────────────
+
+function Deploy-BotServices {
+    [CmdletBinding(SupportsShouldProcess)]
+    [OutputType([PSCustomObject])]
+    param(
+        [Parameter(Mandatory)] [PSCustomObject]$Config,
+        [Parameter(Mandatory)] [AllowEmptyCollection()] [PSCustomObject[]]$Agents,
+        [Parameter(Mandatory)] [string]$ArmToken,
+        [Parameter(Mandatory)] [string]$SubscriptionId,
+        [Parameter(Mandatory)] [string]$ResourceGroup
+    )
+
+    $prefix      = [string]$Config.prefix
+    $location    = [string]$Config.workloads.foundry.location
+    $accountName = [string]$Config.workloads.foundry.accountName
+    $tenantId    = [string](Get-AzContext).Tenant.Id
+    $graphToken  = Get-FoundryGraphToken
+
+    $subClean          = $SubscriptionId -replace '-', ''
+    $subSuffix         = $subClean.Substring($subClean.Length - 8, 8).ToLower()
+    $storageAccountName = "pvfoundrybot$subSuffix"
+    $funcAppName        = "pvfoundry-bot-$subSuffix"
+
+    $botManifest = [PSCustomObject]@{ storageAccountName = $storageAccountName; funcAppName = $funcAppName; bots = @() }
+
+    if (-not $PSCmdlet.ShouldProcess("Bot Services for '$prefix'", 'Deploy')) { return $botManifest }
+
+    $rgPath      = "$($script:ArmBase)/subscriptions/$SubscriptionId/resourceGroups/$ResourceGroup"
+    $accountPath = "$rgPath/providers/Microsoft.CognitiveServices/accounts/$accountName"
+
+    # Deploy Bicep for storage + function app + role assignments
+    $botBicep = Join-Path $PSScriptRoot '..' 'infra' 'bot-services.bicep'
+    Write-LabLog -Message "Deploying Bicep: bot-services.bicep" -Level Info
+
+    az deployment group create `
+        --resource-group $ResourceGroup `
+        --template-file $botBicep `
+        --parameters location=$location `
+                     storageAccountName=$storageAccountName `
+                     funcAppName=$funcAppName `
+                     foundryAccountId=$accountPath `
+        --subscription $SubscriptionId `
+        --output none 2>&1 | Out-Null
+
+    if ($LASTEXITCODE -ne 0) {
+        Write-LabLog -Message "Bot services Bicep deployment failed — falling back to ARM REST." -Level Warning
+    }
+
+    # Get MSI principal from deployed function app
+    $funcAppUri = "$rgPath/providers/Microsoft.Web/sites/$funcAppName`?api-version=2023-01-01"
+    $funcAppObj = Invoke-ArmGet -Uri $funcAppUri -Token $ArmToken
+    $msiPrincipalId = if ($funcAppObj) { [string]$funcAppObj.identity.principalId } else { $null }
+    Write-LabLog -Message "Function App MSI: $msiPrincipalId" -Level Info
+
+    # Entra app registrations (Graph — can't do in Bicep)
+    $botInfoList = [System.Collections.Generic.List[hashtable]]::new()
+
+    foreach ($agentCfg in $Config.workloads.foundry.agents) {
+        $agentFullName = "$prefix-$($agentCfg.name)"
+        $botName       = "$agentFullName-Bot"
+        $routeName     = ([string]$agentCfg.name).ToLower()
+        $msgEndpoint   = "https://$funcAppName.azurewebsites.net/api/$routeName/messages"
+
+        $agentObj     = $Agents | Where-Object { $_.name -eq $agentFullName } | Select-Object -First 1
+        $agentBaseUrl = if ($agentObj -and $agentObj.PSObject.Properties['baseUrl']) { [string]$agentObj.baseUrl } else { '' }
+
+        Write-LabLog -Message "Registering Entra app: $botName" -Level Info
+
+        $searchUri  = "https://graph.microsoft.com/v1.0/applications?`$filter=displayName eq '$botName'"
+        $searchResp = Invoke-WebRequest -Uri $searchUri -Method Get -Headers @{ Authorization = "Bearer $graphToken" } -SkipHttpErrorCheck -ErrorAction Stop
+        $existingApps = ($searchResp.Content | ConvertFrom-Json).value
+
+        $appObjectId = $null; $appClientId = $null; $clientSecret = $null
+
+        if ($existingApps -and @($existingApps).Count -gt 0) {
+            $appObjectId = [string]$existingApps[0].id
+            $appClientId = [string]$existingApps[0].appId
+            Write-LabLog -Message "Entra app already exists: $botName ($appClientId)" -Level Info
+        }
+        else {
+            $appBody = @{ displayName = $botName; signInAudience = 'AzureADMyOrg' } | ConvertTo-Json -Compress
+            $appResp = Invoke-WebRequest -Uri 'https://graph.microsoft.com/v1.0/applications' -Method Post `
+                -Headers @{ Authorization = "Bearer $graphToken"; 'Content-Type' = 'application/json' } `
+                -Body $appBody -SkipHttpErrorCheck -ErrorAction Stop
+            if ([int]$appResp.StatusCode -ge 400) {
+                Write-LabLog -Message "Entra app creation failed for '$botName' (HTTP $($appResp.StatusCode)): $($appResp.Content)" -Level Warning
+                continue
+            }
+            $createdApp  = $appResp.Content | ConvertFrom-Json
+            $appObjectId = [string]$createdApp.id
+            $appClientId = [string]$createdApp.appId
+            Write-LabLog -Message "Created Entra app: $botName ($appClientId)" -Level Success
+        }
+
+        $secretBody = @{ passwordCredential = @{ displayName = 'BotServiceCredential' } } | ConvertTo-Json -Compress
+        $secretResp = Invoke-WebRequest `
+            -Uri "https://graph.microsoft.com/v1.0/applications/$appObjectId/addPassword" -Method Post `
+            -Headers @{ Authorization = "Bearer $graphToken"; 'Content-Type' = 'application/json' } `
+            -Body $secretBody -SkipHttpErrorCheck -ErrorAction Stop
+        if ([int]$secretResp.StatusCode -lt 400) {
+            $clientSecret = [string]($secretResp.Content | ConvertFrom-Json).secretText
+        }
+        else {
+            Write-LabLog -Message "Client secret creation failed for '$botName': $($secretResp.Content)" -Level Warning
+        }
+
+        $botInfoList.Add(@{
+            agentFullName = $agentFullName; botName = $botName; appObjectId = $appObjectId
+            appClientId = $appClientId; clientSecret = $clientSecret; routeName = $routeName
+            msgEndpoint = $msgEndpoint; agentBaseUrl = $agentBaseUrl
+        })
+    }
+
+    # Build + deploy function zip
+    Write-LabLog -Message "Building bot function package with Linux dependencies..." -Level Info
+    $zipBytes   = New-BotFunctionZip -BotInfoList $botInfoList.ToArray()
+    $srcZipPath = Join-Path ([System.IO.Path]::GetTempPath()) 'bot-src.zip'
+    $fatZipPath = Join-Path ([System.IO.Path]::GetTempPath()) 'bot-functions-linux.zip'
+    $buildDir   = Join-Path ([System.IO.Path]::GetTempPath()) "bot-build-$([System.Guid]::NewGuid().ToString('N').Substring(0,8))"
+    [System.IO.File]::WriteAllBytes($srcZipPath, $zipBytes)
+
+    try {
+        New-Item -ItemType Directory -Path $buildDir -Force | Out-Null
+        Expand-Archive -Path $srcZipPath -DestinationPath $buildDir -Force
+        $pipArgs = @('install', '-r', (Join-Path $buildDir 'requirements.txt'),
+            '--target', (Join-Path $buildDir '.python_packages' 'lib' 'site-packages'),
+            '--platform', 'manylinux2014_x86_64', '--python-version', '3.11',
+            '--only-binary=:all:', '--quiet')
+        $pythonCmd = if (Get-Command 'python3.12' -ErrorAction SilentlyContinue) { 'python3.12' } else { 'python3' }
+        & $pythonCmd -m pip @pipArgs 2>&1 | Out-Null
+        if (Test-Path $fatZipPath) { Remove-Item $fatZipPath -Force }
+        Compress-Archive -Path (Join-Path $buildDir '*') -DestinationPath $fatZipPath -Force
+        Write-LabLog -Message "Fat zip built: $fatZipPath ($([math]::Round((Get-Item $fatZipPath).Length / 1MB, 1)) MB)" -Level Info
+    }
+    finally {
+        Remove-Item $buildDir -Recurse -Force -ErrorAction SilentlyContinue
+        Remove-Item $srcZipPath -Force -ErrorAction SilentlyContinue
+    }
+
+    # Upload to blob + set WEBSITE_RUN_FROM_PACKAGE
+    $containerName = 'function-releases'; $blobName = 'bot-functions.zip'
+    $currentUserId = [string](Get-AzContext).Account.Id
+    try {
+        az role assignment create --assignee $currentUserId --role 'Storage Blob Data Owner' `
+            --scope "$rgPath/providers/Microsoft.Storage/storageAccounts/$storageAccountName" `
+            --subscription $SubscriptionId --output none 2>&1 | Out-Null
+    } catch { Write-LabLog -Message "Blob role assignment skipped (may already exist)." -Level Info }
+
+    az storage container create --name $containerName --account-name $storageAccountName `
+        --auth-mode login --subscription $SubscriptionId --output none 2>&1 | Out-Null
+    az storage blob upload --account-name $storageAccountName --container-name $containerName `
+        --name $blobName --file $fatZipPath --overwrite --auth-mode login `
+        --subscription $SubscriptionId --output none 2>&1 | Out-Null
+
+    $sasExpiry  = (Get-Date).AddDays(7).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
+    $blobSasUrl = az storage blob generate-sas --account-name $storageAccountName `
+        --container-name $containerName --name $blobName --permissions r --expiry $sasExpiry `
+        --auth-mode login --as-user --full-uri --subscription $SubscriptionId --output tsv 2>&1
+    Remove-Item $fatZipPath -Force -ErrorAction SilentlyContinue
+    if (-not $blobSasUrl -or $blobSasUrl -notmatch '^https://') {
+        Write-LabLog -Message "SAS generation failed. Set WEBSITE_RUN_FROM_PACKAGE manually." -Level Warning
+        $blobSasUrl = $null
+    }
+
+    # Update function app settings
+    $settingsDict = @{ FUNCTIONS_WORKER_RUNTIME = 'python'; FUNCTIONS_EXTENSION_VERSION = '~4'; 'AzureWebJobsStorage__accountName' = $storageAccountName }
+    if ($blobSasUrl) { $settingsDict['WEBSITE_RUN_FROM_PACKAGE'] = $blobSasUrl }
+    foreach ($botInfo in $botInfoList) {
+        $ep = switch ($botInfo.routeName) {
+            'hr-helpdesk' { 'HR' }; 'finance-analyst' { 'FINANCE' }
+            'it-support' { 'IT' };  'sales-research' { 'SALES' }
+            default { ($botInfo.routeName -replace '-', '_').ToUpper() }
+        }
+        $settingsDict["${ep}_APP_ID"]    = $botInfo.appClientId
+        $settingsDict["${ep}_AGENT_URL"] = $botInfo.agentBaseUrl
+    }
+    $settingsUri  = "$rgPath/providers/Microsoft.Web/sites/$funcAppName/config/appsettings?api-version=2023-01-01"
+    $settingsBody = @{ properties = $settingsDict } | ConvertTo-Json -Depth 5 -Compress
+    try { Invoke-ArmPut -Uri $settingsUri -Body $settingsBody -Token $ArmToken | Out-Null; Write-LabLog -Message 'Updated Function App settings.' -Level Success }
+    catch { Write-LabLog -Message "Error updating app settings: $($_.Exception.Message)" -Level Warning }
+
+    # Restart function app
+    try {
+        Invoke-WebRequest -Uri "$rgPath/providers/Microsoft.Web/sites/$funcAppName/restart?api-version=2023-01-01" `
+            -Method Post -Headers @{ Authorization = "Bearer $ArmToken" } -SkipHttpErrorCheck -ErrorAction Stop | Out-Null
+        Write-LabLog -Message "Function App restarted." -Level Success
+    } catch { Write-LabLog -Message "Function App restart skipped: $($_.Exception.Message)" -Level Info }
+
+    # Deploy Bot Services + Teams channels via Bicep
+    $botPerAgentBicep = Join-Path $PSScriptRoot '..' 'infra' 'bot-per-agent.bicep'
+    $createdBots = [System.Collections.Generic.List[PSCustomObject]]::new()
+
+    foreach ($botInfo in $botInfoList) {
+        $botName = $botInfo.botName
+        Write-LabLog -Message "Creating Bot Service: $botName" -Level Info
+        try {
+            az deployment group create --resource-group $ResourceGroup `
+                --template-file $botPerAgentBicep `
+                --parameters botName=$botName `
+                             msaAppId=$($botInfo.appClientId) `
+                             tenantId=$tenantId `
+                             endpoint=$($botInfo.msgEndpoint) `
+                --subscription $SubscriptionId --output none 2>&1 | Out-Null
+
+            if ($LASTEXITCODE -eq 0) {
+                Write-LabLog -Message "Created Bot Service + Teams channel: $botName" -Level Success
+                $createdBots.Add([PSCustomObject]@{
+                    botName = $botName; appClientId = $botInfo.appClientId
+                    appObjectId = $botInfo.appObjectId; msgEndpoint = $botInfo.msgEndpoint; teamsEnabled = $true
+                })
+            }
+            else {
+                Write-LabLog -Message "Bot Service Bicep failed for '$botName' — skipping." -Level Warning
+            }
+        }
+        catch {
+            Write-LabLog -Message "Error creating Bot Service '$botName': $($_.Exception.Message)" -Level Warning
+        }
+    }
+
+    $botManifest.bots = $createdBots.ToArray()
+    return $botManifest
+}
+
+# ─── Remove Bot Services ────────────────────────────────────────────────────
+
+function Remove-BotServices {
+    [CmdletBinding(SupportsShouldProcess)]
+    param(
+        [Parameter(Mandatory)] [PSCustomObject]$Config,
+        [Parameter()] [PSCustomObject]$BotManifest,
+        [Parameter(Mandatory)] [string]$ArmToken,
+        [Parameter(Mandatory)] [string]$SubscriptionId,
+        [Parameter(Mandatory)] [string]$ResourceGroup
+    )
+
+    $graphToken = Get-FoundryGraphToken
+    $rgPath     = "$($script:ArmBase)/subscriptions/$SubscriptionId/resourceGroups/$ResourceGroup"
+
+    $bots = if ($BotManifest -and $BotManifest.PSObject.Properties['bots'] -and $BotManifest.bots) { @($BotManifest.bots) } else { @() }
+    $funcAppName = if ($BotManifest -and $BotManifest.PSObject.Properties['funcAppName'] -and
+        -not [string]::IsNullOrWhiteSpace([string]$BotManifest.funcAppName)) { [string]$BotManifest.funcAppName }
+    else {
+        $subClean = $SubscriptionId -replace '-', ''; $subSuffix = $subClean.Substring($subClean.Length - 8, 8).ToLower()
+        "pvfoundry-bot-$subSuffix"
+    }
+
+    if (-not $PSCmdlet.ShouldProcess("Bot Services for '$($Config.prefix)'", 'Remove')) { return }
+
+    foreach ($bot in $bots) {
+        $botName = [string]$bot.botName
+        if ([string]::IsNullOrWhiteSpace($botName)) { continue }
+        try {
+            Invoke-ArmDelete -Uri "$rgPath/providers/Microsoft.BotService/botServices/$botName/channels/MsTeamsChannel`?api-version=2023-09-15-preview" -Token $ArmToken | Out-Null
+            Write-LabLog -Message "Removed Teams channel: $botName" -Level Success
+        } catch { Write-LabLog -Message "Teams channel removal skipped for '$botName': $($_.Exception.Message)" -Level Info }
+        try {
+            Invoke-ArmDelete -Uri "$rgPath/providers/Microsoft.BotService/botServices/$botName`?api-version=2023-09-15-preview" -Token $ArmToken | Out-Null
+            Write-LabLog -Message "Removed Bot Service: $botName" -Level Success
+        } catch { Write-LabLog -Message "Error removing Bot Service '$botName': $($_.Exception.Message)" -Level Warning }
+    }
+
+    foreach ($bot in $bots) {
+        $appObjectId = [string]$bot.appObjectId
+        if ([string]::IsNullOrWhiteSpace($appObjectId)) { continue }
+        try {
+            Invoke-WebRequest -Uri "https://graph.microsoft.com/v1.0/applications/$appObjectId" -Method Delete `
+                -Headers @{ Authorization = "Bearer $graphToken" } -SkipHttpErrorCheck -ErrorAction Stop | Out-Null
+            Write-LabLog -Message "Deleted Entra app: $appObjectId" -Level Success
+        } catch { Write-LabLog -Message "Error deleting Entra app '$appObjectId': $($_.Exception.Message)" -Level Warning }
+    }
+
+    try {
+        Invoke-ArmDelete -Uri "$rgPath/providers/Microsoft.Web/sites/$funcAppName`?api-version=2023-01-01" -Token $ArmToken | Out-Null
+        Write-LabLog -Message "Removed Function App: $funcAppName" -Level Success
+    } catch { Write-LabLog -Message "Error removing Function App '$funcAppName': $($_.Exception.Message)" -Level Warning }
+}
+
+# ─── Teams Catalog ───────────────────────────────────────────────────────────
+
+function Publish-TeamsApps {
+    [CmdletBinding(SupportsShouldProcess)]
+    [OutputType([PSCustomObject[]])]
+    param(
+        [Parameter(Mandatory)] [PSCustomObject]$Config,
+        [Parameter(Mandatory)] [PSCustomObject[]]$Agents,
+        [Parameter(Mandatory)] [string]$TenantId
+    )
+
+    if (-not $PSCmdlet.ShouldProcess("Teams app catalog for '$($Config.prefix)'", 'Publish')) {
+        return @()
+    }
+
+    Write-LabLog -Message 'Publishing agent packages to Teams app catalog...' -Level Info
+    $published = [System.Collections.Generic.List[PSCustomObject]]::new()
+
+    try {
+        Connect-MgGraph -Scopes 'AppCatalog.ReadWrite.All' -TenantId $TenantId -NoWelcome -ErrorAction Stop
+
+        $catalogApps = $null
+        try {
+            $catalogResp = Invoke-MgGraphRequest -Method GET `
+                -Uri "v1.0/appCatalogs/teamsApps?`$filter=distributionMethod eq 'organization'&`$expand=appDefinitions" -ErrorAction Stop
+            $catalogApps = $catalogResp.value
+        } catch { Write-LabLog -Message "Could not query Teams catalog: $($_.Exception.Message)" -Level Warning }
+
+        foreach ($agent in $Agents) {
+            $pkgPath = if ($agent.PSObject.Properties['packagePath']) { [string]$agent.packagePath } else { $null }
+            if (-not $pkgPath -or -not (Test-Path $pkgPath)) {
+                Write-LabLog -Message "No package found for $($agent.name) — skipping catalog publish." -Level Warning
+                continue
+            }
+            $agentName = [string]$agent.name
+            $shortName = $agentName -replace "^$([regex]::Escape($Config.prefix))-", ''
+
+            $existing = if ($catalogApps) {
+                $catalogApps | Where-Object { $_.appDefinitions | Where-Object { $_.displayName -eq $shortName } } | Select-Object -First 1
+            } else { $null }
+
+            try {
+                if ($existing) {
+                    $appId = [string]$existing.id
+                    Invoke-MgGraphRequest -Method POST -Uri "v1.0/appCatalogs/teamsApps/$appId/appDefinitions" `
+                        -ContentType 'application/zip' -InputFilePath $pkgPath -ErrorAction Stop | Out-Null
+                    Write-LabLog -Message "Updated Teams app: $shortName ($appId)" -Level Success
+                    $published.Add([PSCustomObject]@{ name = $shortName; teamsAppId = $appId; action = 'updated' })
+                }
+                else {
+                    $newApp = Invoke-MgGraphRequest -Method POST -Uri 'v1.0/appCatalogs/teamsApps?requiresReview=false' `
+                        -ContentType 'application/zip' -InputFilePath $pkgPath -ErrorAction Stop
+                    $newId = [string]$newApp.id
+                    Write-LabLog -Message "Published Teams app: $shortName ($newId)" -Level Success
+                    $published.Add([PSCustomObject]@{ name = $shortName; teamsAppId = $newId; action = 'created' })
+                }
+            } catch { Write-LabLog -Message "Teams catalog publish failed for '$shortName': $($_.Exception.Message)" -Level Warning }
+        }
+    }
+    catch { Write-LabLog -Message "Teams catalog publish skipped: $($_.Exception.Message)" -Level Warning }
+
+    return $published.ToArray()
+}
+
+function Remove-TeamsApps {
+    [CmdletBinding(SupportsShouldProcess)]
+    param(
+        [Parameter(Mandatory)] [PSCustomObject[]]$TeamsApps,
+        [Parameter(Mandatory)] [string]$TenantId
+    )
+
+    if (-not $PSCmdlet.ShouldProcess("Teams app catalog", 'Remove apps')) { return }
+
+    try {
+        Connect-MgGraph -Scopes 'AppCatalog.ReadWrite.All' -TenantId $TenantId -NoWelcome -ErrorAction Stop
+        foreach ($app in $TeamsApps) {
+            $appId = [string]$app.teamsAppId
+            if ([string]::IsNullOrWhiteSpace($appId)) { continue }
+            try {
+                Invoke-MgGraphRequest -Method DELETE -Uri "v1.0/appCatalogs/teamsApps/$appId" -ErrorAction Stop | Out-Null
+                Write-LabLog -Message "Removed Teams app: $($app.name) ($appId)" -Level Success
+            } catch { Write-LabLog -Message "Error removing Teams app '$($app.name)': $($_.Exception.Message)" -Level Warning }
+        }
+    }
+    catch { Write-LabLog -Message "Teams catalog removal skipped: $($_.Exception.Message)" -Level Warning }
+}
+
+Export-ModuleMember -Function @(
+    'Get-FoundryArmToken'
+    'Get-FoundryDataToken'
+    'Get-FoundryGraphToken'
+    'Invoke-ArmGet'
+    'Invoke-ArmPut'
+    'Invoke-ArmDelete'
+    'Wait-ArmAsyncOperation'
+    'Deploy-FoundryBicep'
+    'Remove-FoundryBicep'
+    'Initialize-PngWriter'
+    'New-FoundryAgentPackage'
+    'New-BotFunctionZip'
+    'Deploy-BotServices'
+    'Remove-BotServices'
+    'Publish-TeamsApps'
+    'Remove-TeamsApps'
+)

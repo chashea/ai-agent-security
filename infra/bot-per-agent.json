@@ -1,0 +1,82 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "metadata": {
+    "_generator": {
+      "name": "bicep",
+      "version": "0.39.26.7824",
+      "templateHash": "6195143375853286357"
+    }
+  },
+  "parameters": {
+    "botName": {
+      "type": "string",
+      "metadata": {
+        "description": "Bot Service display name and resource name"
+      }
+    },
+    "msaAppId": {
+      "type": "string",
+      "metadata": {
+        "description": "Entra app (client) ID for the bot"
+      }
+    },
+    "tenantId": {
+      "type": "string",
+      "metadata": {
+        "description": "Tenant ID for single-tenant bot"
+      }
+    },
+    "endpoint": {
+      "type": "string",
+      "metadata": {
+        "description": "Message endpoint URL (Function App route)"
+      }
+    }
+  },
+  "resources": [
+    {
+      "type": "Microsoft.BotService/botServices",
+      "apiVersion": "2023-09-15-preview",
+      "name": "[parameters('botName')]",
+      "location": "global",
+      "kind": "azurebot",
+      "sku": {
+        "name": "F0"
+      },
+      "properties": {
+        "displayName": "[parameters('botName')]",
+        "msaAppType": "SingleTenant",
+        "msaAppId": "[parameters('msaAppId')]",
+        "msaAppTenantId": "[parameters('tenantId')]",
+        "endpoint": "[parameters('endpoint')]"
+      }
+    },
+    {
+      "type": "Microsoft.BotService/botServices/channels",
+      "apiVersion": "2023-09-15-preview",
+      "name": "[format('{0}/{1}', parameters('botName'), 'MsTeamsChannel')]",
+      "location": "global",
+      "properties": {
+        "channelName": "MsTeamsChannel",
+        "properties": {
+          "enableCalling": false,
+          "isEnabled": true
+        }
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.BotService/botServices', parameters('botName'))]"
+      ]
+    }
+  ],
+  "outputs": {
+    "botName": {
+      "type": "string",
+      "value": "[parameters('botName')]"
+    },
+    "botId": {
+      "type": "string",
+      "value": "[resourceId('Microsoft.BotService/botServices', parameters('botName'))]"
+    }
+  }
+}

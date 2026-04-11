@@ -22,3 +22,12 @@ Thumbs.db
 *.pfx
 *.pem
 *.key
+
+# Python
+scripts/__pycache__/
+scripts/tests/__pycache__/
+scripts/.venv/
+*.pyc
+
+# Packages (generated at deploy time)
+packages/

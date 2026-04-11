@@ -1,4 +1,4 @@
-#Requires -Version 7.0
+﻿#Requires -Version 7.0
 
 <#
 .SYNOPSIS
@@ -362,7 +362,7 @@ try {
                 Deploy-Foundry -Config $Config -WhatIf:$WhatIfPreference
             }
             Invoke-Workload -Name 'agentIdentity' -Step 'AgentIdentity' -Description 'Configuring agent managed identity and RBAC' -Action {
-                Deploy-AgentIdentity -Config $Config -WhatIf:$WhatIfPreference
+                Deploy-AgentIdentity -Config $Config -FoundryManifest $manifest['foundry'] -WhatIf:$WhatIfPreference
             }
         }
         else {
@@ -428,6 +428,12 @@ try {
         if ($Config.workloads.PSObject.Properties['conditionalAccess'] -and $Config.workloads.conditionalAccess.enabled) {
             Invoke-Workload -Name 'conditionalAccess' -Step 'ConditionalAccess' -Description 'Deploying Conditional Access policies' -Action {
                 Deploy-ConditionalAccess -Config $Config -WhatIf:$WhatIfPreference
+            }
+        }
+
+        if ($Config.workloads.PSObject.Properties['mdca'] -and $Config.workloads.mdca.enabled) {
+            Invoke-Workload -Name 'mdca' -Step 'MDCA' -Description 'Configuring Defender for Cloud Apps policies' -Action {
+                Deploy-MDCA -Config $Config -FoundryManifest $manifest['foundry'] -WhatIf:$WhatIfPreference
             }
         }
 

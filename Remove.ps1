@@ -186,6 +186,12 @@ try {
             Write-LabLog -Message 'AuditConfig removal complete.' -Level Success
         }
 
+        if ($Config.workloads.PSObject.Properties['mdca'] -and $Config.workloads.mdca.enabled) {
+            Write-LabStep -StepName 'MDCA' -Description 'Removing Defender for Cloud Apps policies'
+            Remove-MDCA -Config $Config -Manifest (Get-WorkloadManifest -WorkloadName 'mdca') -WhatIf:$WhatIfPreference
+            Write-LabLog -Message 'MDCA removal complete.' -Level Success
+        }
+
         if ($Config.workloads.PSObject.Properties['conditionalAccess'] -and $Config.workloads.conditionalAccess.enabled) {
             Write-LabStep -StepName 'ConditionalAccess' -Description 'Removing Conditional Access policies'
             Remove-ConditionalAccess -Config $Config -Manifest (Get-WorkloadManifest -WorkloadName 'conditionalAccess') -WhatIf:$WhatIfPreference

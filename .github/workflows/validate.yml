@@ -1,4 +1,4 @@
-name: Validate PowerShell
+name: Validate PowerShell + Python + Bicep
 
 on:
   push:
@@ -30,7 +30,7 @@ jobs:
       - name: Run PSScriptAnalyzer
         shell: pwsh
         run: |
-          $results = Invoke-ScriptAnalyzer -Path . -Recurse -Severity Warning -ExcludeRule PSAvoidUsingWriteHost,PSUseSingularNouns
+          $results = Invoke-ScriptAnalyzer -Path . -Recurse -Severity Warning -ExcludeRule PSAvoidUsingWriteHost,PSUseSingularNouns,PSUseBOMForUnicodeEncodedFile
           if ($results) {
               $results | Format-Table -AutoSize
               throw "PSScriptAnalyzer found $($results.Count) issue(s)"
@@ -72,3 +72,50 @@ jobs:
           Write-Host "Config loaded: $($config.labName) (prefix: $($config.prefix))"
           $valid = Test-LabConfigValidity -Config $config
           Write-Host "Config valid: $valid"
+
+  python-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install ruff
+        run: pip install ruff
+
+      - name: Run ruff
+        run: ruff check scripts/
+
+  python-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: pip install -r scripts/requirements.txt pytest
+
+      - name: Run pytest
+        run: pytest scripts/tests/ -v
+
+  bicep-validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Bicep CLI
+        run: az bicep install
+
+      - name: Validate Bicep templates
+        run: |
+          az bicep build --file infra/foundry-core.bicep
+          az bicep build --file infra/foundry-resources.bicep
+          az bicep build --file infra/foundry-eval-infra.bicep
+          az bicep build --file infra/bot-services.bicep
+          az bicep build --file infra/bot-per-agent.bicep
+          echo "Bicep: All templates compiled successfully"

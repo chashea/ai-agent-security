@@ -60,6 +60,41 @@ function Test-LabPrerequisites {
                 Write-Verbose "Module found: $moduleName ($($module.Version))"
             }
         }
+
+        # Check Python 3.11+ for Foundry SDK script
+        $pythonCmd = if (Get-Command 'python3.12' -ErrorAction SilentlyContinue) { 'python3.12' }
+                     elseif (Get-Command 'python3' -ErrorAction SilentlyContinue) { 'python3' }
+                     else { $null }
+        if (-not $pythonCmd) {
+            Write-Warning 'Python 3.11+ is required for the Foundry agent SDK script. Install python3.12.'
+            $allPassed = $false
+        }
+        else {
+            $pyVersion = & $pythonCmd --version 2>&1
+            Write-Verbose "Python found: $pyVersion"
+
+            # Check required Python packages
+            foreach ($pkg in @('azure-ai-projects', 'azure-search-documents')) {
+                & $pythonCmd -m pip show $pkg 2>&1 | Out-Null
+                if ($LASTEXITCODE -ne 0) {
+                    Write-Warning "Python package '$pkg' not installed. Install with: $pythonCmd -m pip install -r scripts/requirements.txt"
+                    $allPassed = $false
+                }
+                else {
+                    Write-Verbose "Python package $pkg found."
+                }
+            }
+        }
+
+        # Check Azure Bicep CLI
+        $bicepVersion = az bicep version 2>&1
+        if ($LASTEXITCODE -ne 0) {
+            Write-Warning 'Azure Bicep CLI not found. Install with: az bicep install'
+            $allPassed = $false
+        }
+        else {
+            Write-Verbose "Bicep found: $bicepVersion"
+        }
     }
 
     return $allPassed
@@ -85,7 +120,8 @@ function Connect-LabServices {
         'Organization.Read.All'
         'Policy.ReadWrite.ConditionalAccess'
         'Policy.Read.All'
-        'Application.Read.All'
+        'Application.ReadWrite.All'
+        'CloudAppSecurity.ReadWrite.All'
         'eDiscovery.ReadWrite.All'
     )
 
@@ -94,7 +130,14 @@ function Connect-LabServices {
 
     Write-Verbose "Connecting to Microsoft Graph (tenant: $TenantId)..."
     Disconnect-MgGraph -ErrorAction SilentlyContinue
-    Connect-MgGraph -TenantId $TenantId -Scopes $graphScopes -NoWelcome -ErrorAction Stop
+    # Use device code auth when interactive browser is unavailable (CI, background processes)
+    try {
+        Connect-MgGraph -TenantId $TenantId -Scopes $graphScopes -NoWelcome -ErrorAction Stop
+    }
+    catch {
+        Write-LabLog -Message 'Browser auth failed — falling back to device code flow.' -Level Warning
+        Connect-MgGraph -TenantId $TenantId -Scopes $graphScopes -NoWelcome -UseDeviceCode -ErrorAction Stop
+    }
 
     $graphContext = Get-MgContext
     if (-not $graphContext -or [string]::IsNullOrWhiteSpace($graphContext.Account)) {
@@ -256,7 +299,8 @@ function Import-LabConfig {
         }
     }
 
-    $schemaPath = Join-Path (Split-Path $ConfigPath) '_schema.json'
+    $configDir  = Split-Path $ConfigPath
+    $schemaPath = if ($configDir) { Join-Path $configDir '_schema.json' } else { '_schema.json' }
     if (Test-Path $schemaPath) {
         Write-Verbose "Schema file found at $schemaPath. Schema validation is not yet implemented."
     }
@@ -495,6 +539,7 @@ function Test-LabConfigValidity {
         'communicationCompliance'   = @('policies')
         'insiderRisk'               = @('policies')
         'conditionalAccess'         = @('policies')
+        'mdca'                      = @('policies')
     }
 
     foreach ($workloadName in $workloadRequirements.Keys) {
