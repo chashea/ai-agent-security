@@ -1,0 +1,364 @@
+{
+  "labName": "AI Agent Security",
+  "prefix": "AISec",
+  "domain": "MngEnvMCAP648165.onmicrosoft.com",
+  "cloud": "commercial",
+  "workloads": {
+    "foundry": {
+      "enabled": true,
+      "subscriptionId": "9d02bc65-7c0d-4c6a-b824-da0000cb7c7d",
+      "resourceGroup": "rg-ai-agent-security",
+      "location": "swedencentral",
+      "accountName": "aisec-foundry",
+      "projectName": "aisec-project",
+      "modelDeploymentName": "gpt-4o",
+      "agents": [
+        {
+          "name": "HR-Helpdesk",
+          "description": "HR policy, benefits, and PTO assistant",
+          "instructions": "You are an HR helpdesk assistant for Contoso. Answer questions about HR policies, benefits, paid time off, and the employee handbook. Be helpful and professional. Do not share personnel records or personally identifiable information about specific employees.",
+          "model": "gpt-4o"
+        },
+        {
+          "name": "Finance-Analyst",
+          "description": "Financial data analysis and reporting assistant",
+          "instructions": "You are a finance assistant for Contoso. Help analyze financial summaries, expense reports, and budget forecasts. Be accurate and thorough. Handle financial data with care — do not share account numbers, credit card data, or confidential financial reports with users who are not authorized to access them.",
+          "model": "gpt-4o"
+        },
+        {
+          "name": "IT-Support",
+          "description": "IT helpdesk and system access assistant",
+          "instructions": "You are an IT support assistant for Contoso. Help employees with troubleshooting, software access requests, device issues, and general IT questions. Never ask for, reveal, or repeat credentials, API keys, admin passwords, or security tokens.",
+          "model": "gpt-4o"
+        },
+        {
+          "name": "Sales-Research",
+          "description": "Market research and competitive intelligence assistant",
+          "instructions": "You are a sales research assistant for Contoso. Help with market analysis, competitive intelligence, and customer prospect research. Handle customer data in accordance with company privacy policy — do not share personally identifiable information or confidential business strategy with external parties.",
+          "model": "gpt-4o"
+        }
+      ],
+      "botService": { "enabled": true }
+    },
+    "agentIdentity": {
+      "enabled": false
+    },
+    "testUsers": {
+      "enabled": true,
+      "mode": "existing",
+      "users": [
+        {
+          "identity": "charlesshea@MngEnvMCAP648165.onmicrosoft.com"
+        }
+      ],
+      "groups": [
+        {
+          "displayName": "AISec-Finance-Team",
+          "members": ["charlesshea"]
+        },
+        {
+          "displayName": "AISec-IT-Team",
+          "members": ["charlesshea"]
+        },
+        {
+          "displayName": "AISec-Sales-Team",
+          "members": ["charlesshea"]
+        }
+      ]
+    },
+    "sensitivityLabels": {
+      "enabled": true,
+      "labels": [
+        {
+          "name": "Confidential",
+          "tooltip": "Data that requires protection from unauthorized access",
+          "color": "#0078D4",
+          "sublabels": [
+            {
+              "name": "AI-Accessible",
+              "tooltip": "No encryption — content can be retrieved by Foundry RAG and AI indexing pipelines",
+              "encryption": false
+            },
+            {
+              "name": "AI-Protected",
+              "tooltip": "Encrypted — user-context token required; retrievable by RAG only for authorized users",
+              "encryption": true,
+              "contentMarking": {
+                "headerText": "CONFIDENTIAL - AI Protected",
+                "footerText": "Protected content — AI access requires user authorization"
+              }
+            }
+          ]
+        },
+        {
+          "name": "Highly Confidential",
+          "tooltip": "Highly sensitive data requiring strict access controls and restricted AI access",
+          "color": "#D13438",
+          "sublabels": [
+            {
+              "name": "AI-Restricted",
+              "tooltip": "Encrypted — blocked from AI indexing and RAG retrieval; human review only",
+              "encryption": true,
+              "contentMarking": {
+                "headerText": "HIGHLY CONFIDENTIAL - AI Restricted",
+                "footerText": "AI access blocked. Human authorization required."
+              }
+            },
+            {
+              "name": "Executives-Only",
+              "tooltip": "Encrypted — restricted to executive group; not accessible via AI agents",
+              "encryption": true,
+              "contentMarking": {
+                "headerText": "HIGHLY CONFIDENTIAL - Executives Only",
+                "footerText": "Executive eyes only. Do not share with AI systems."
+              }
+            }
+          ]
+        }
+      ],
+      "autoLabelPolicies": [
+        {
+          "name": "Auto-label SSN as Confidential AI-Protected",
+          "labelName": "Confidential\\AI-Protected",
+          "sensitiveInfoTypes": ["U.S. Social Security Number (SSN)"],
+          "locations": ["Exchange", "SharePoint"]
+        }
+      ]
+    },
+    "dlp": {
+      "enabled": true,
+      "simulationMode": false,
+      "policies": [
+        {
+          "name": "AI Agent - PII Prompt Protection",
+          "locations": ["EnterpriseAI"],
+          "rules": [
+            {
+              "name": "Block PII Prompts - Elevated Risk",
+              "sensitiveInfoTypes": [
+                "U.S. Social Security Number (SSN)",
+                "Credit Card Number",
+                "U.S. Bank Account Number",
+                "All Medical Terms And Conditions"
+              ],
+              "minCount": 1,
+              "insiderRiskLevel": "Elevated",
+              "enforcement": {
+                "action": "block",
+                "userNotification": {
+                  "enabled": true,
+                  "message": "Your prompt contains sensitive data and cannot be processed by this AI agent. Remove sensitive information and try again."
+                },
+                "alert": { "enabled": true, "severity": "high" },
+                "incidentReport": { "enabled": true, "severity": "high" }
+              }
+            },
+            {
+              "name": "Warn PII Prompts - Moderate Risk",
+              "sensitiveInfoTypes": [
+                "U.S. Social Security Number (SSN)",
+                "Credit Card Number",
+                "U.S. Bank Account Number",
+                "All Medical Terms And Conditions"
+              ],
+              "minCount": 1,
+              "insiderRiskLevel": "Moderate",
+              "enforcement": {
+                "action": "allowWithJustification",
+                "userNotification": {
+                  "enabled": true,
+                  "message": "Your prompt may contain sensitive data. Sharing sensitive information with AI agents may violate company policy."
+                },
+                "alert": { "enabled": true, "severity": "medium" },
+                "incidentReport": { "enabled": true, "severity": "medium" }
+              }
+            },
+            {
+              "name": "Audit PII Prompts - Minor Risk",
+              "sensitiveInfoTypes": [
+                "U.S. Social Security Number (SSN)",
+                "Credit Card Number",
+                "U.S. Bank Account Number",
+                "All Medical Terms And Conditions"
+              ],
+              "minCount": 1,
+              "insiderRiskLevel": "Minor",
+              "enforcement": {
+                "action": "auditOnly",
+                "alert": { "enabled": true, "severity": "low" }
+              }
+            }
+          ]
+        },
+        {
+          "name": "AI Agent - Sensitivity Label Block",
+          "locations": ["CopilotExperiences"],
+          "rules": [
+            {
+              "name": "Block Highly Confidential AI-Restricted Content",
+              "sensitiveInfoTypes": [],
+              "minCount": 1,
+              "labels": ["AISec-Highly-Confidential-AI-Restricted"],
+              "enforcement": {
+                "action": "block",
+                "userNotification": {
+                  "enabled": true,
+                  "message": "This content is labeled Highly Confidential - AI Restricted and cannot be processed by AI agents."
+                },
+                "alert": { "enabled": true, "severity": "high" },
+                "incidentReport": { "enabled": true, "severity": "high" }
+              }
+            },
+            {
+              "name": "Block Executives-Only Content",
+              "sensitiveInfoTypes": [],
+              "minCount": 1,
+              "labels": ["AISec-Highly-Confidential-Executives-Only"],
+              "enforcement": {
+                "action": "block",
+                "userNotification": {
+                  "enabled": true,
+                  "message": "This content is restricted to executives and cannot be processed by AI agents."
+                },
+                "alert": { "enabled": true, "severity": "high" },
+                "incidentReport": { "enabled": true, "severity": "high" }
+              }
+            }
+          ]
+        },
+        {
+          "name": "AI Agent - Endpoint Shadow AI Block",
+          "locations": ["Devices"],
+          "endpointDlpBrowserRestrictions": {
+            "blockedUrls": [
+              "chat.openai.com",
+              "chatgpt.com",
+              "claude.ai",
+              "gemini.google.com",
+              "copilot.microsoft.com",
+              "perplexity.ai",
+              "huggingface.co/chat"
+            ]
+          },
+          "rules": [
+            {
+              "name": "Endpoint Shadow AI Block - Elevated Risk",
+              "sensitiveInfoTypes": [
+                "U.S. Social Security Number (SSN)",
+                "Credit Card Number",
+                "U.S. Bank Account Number",
+                "All Medical Terms And Conditions"
+              ],
+              "minCount": 1,
+              "insiderRiskLevel": "Elevated",
+              "enforcement": {
+                "action": "block",
+                "userNotification": {
+                  "enabled": true,
+                  "message": "Uploading sensitive data to unauthorized AI tools is blocked by company policy."
+                },
+                "alert": { "enabled": true, "severity": "high" },
+                "incidentReport": { "enabled": true, "severity": "high" }
+              }
+            },
+            {
+              "name": "Endpoint Shadow AI Warn - Moderate Risk",
+              "sensitiveInfoTypes": [
+                "U.S. Social Security Number (SSN)",
+                "Credit Card Number",
+                "U.S. Bank Account Number",
+                "All Medical Terms And Conditions"
+              ],
+              "minCount": 1,
+              "insiderRiskLevel": "Moderate",
+              "enforcement": {
+                "action": "allowWithJustification",
+                "userNotification": {
+                  "enabled": true,
+                  "message": "You are about to share potentially sensitive data with an external AI tool. This may violate company policy."
+                },
+                "alert": { "enabled": true, "severity": "medium" }
+              }
+            },
+            {
+              "name": "Endpoint Shadow AI Audit - Minor Risk",
+              "sensitiveInfoTypes": [
+                "U.S. Social Security Number (SSN)",
+                "Credit Card Number",
+                "U.S. Bank Account Number",
+                "All Medical Terms And Conditions"
+              ],
+              "minCount": 1,
+              "insiderRiskLevel": "Minor",
+              "enforcement": {
+                "action": "auditOnly",
+                "alert": { "enabled": true, "severity": "low" }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "retention": {
+      "enabled": true,
+      "policies": [
+        {
+          "name": "AI Interaction Retention - 1 Year",
+          "retentionDays": 365,
+          "retentionAction": "retainAndDelete",
+          "locations": ["Exchange", "OneDrive"]
+        }
+      ]
+    },
+    "eDiscovery": {
+      "enabled": true,
+      "cases": [
+        {
+          "name": "AI-Governance-Investigation",
+          "description": "Forensic investigation into AI agent interactions and potential data misuse",
+          "custodians": [
+            "charlesshea@MngEnvMCAP648165.onmicrosoft.com"
+          ],
+          "holdQuery": "AI OR Copilot OR \"sensitive data\" OR \"blocked prompt\"",
+          "searchQuery": "DlpRuleMatch OR AIInteraction OR FoundryAgent"
+        }
+      ]
+    },
+    "communicationCompliance": {
+      "enabled": true,
+      "policies": [
+        {
+          "name": "AI Agent Interaction Monitoring",
+          "description": "DSPM for AI — captures all AI agent interactions for compliance review and Activity Explorer surfacing"
+        }
+      ]
+    },
+    "insiderRisk": {
+      "enabled": true,
+      "policies": [
+        {
+          "name": "AI Agent Risky Usage",
+          "template": "Risky AI usage",
+          "priorityUserGroups": ["AISec-Finance-Team", "AISec-Sales-Team"],
+          "indicators": ["AIRiskyUsage"]
+        }
+      ]
+    },
+    "conditionalAccess": {
+      "enabled": false
+    },
+    "auditConfig": {
+      "enabled": true,
+      "searches": [
+        {
+          "name": "AI Interaction Audit",
+          "operations": ["CopilotInteraction"]
+        },
+        {
+          "name": "DLP Violations in AI",
+          "operations": ["DlpRuleMatch", "DlpRuleUndo"]
+        }
+      ]
+    }
+  }
+}

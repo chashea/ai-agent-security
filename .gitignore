@@ -1,0 +1,24 @@
+# Deployment manifests (contain tenant-specific IDs)
+manifests/
+
+# Transcripts
+*.log
+
+# Claude Code task artifacts
+tasks/
+
+# PowerShell
+*.psm1.bak
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Secrets
+*.pfx
+*.pem
+*.key
