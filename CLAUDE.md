@@ -69,44 +69,63 @@ ruff check scripts/
 python3.12 -m pytest scripts/tests/ -v
 
 # Validate Bicep templates
-az bicep build --file infra/foundry-core.bicep
+az bicep build --file infra/foundry-eval-infra.bicep
 az bicep build --file infra/bot-services.bicep
+az bicep build --file infra/bot-per-agent.bicep
+az bicep build --file infra/defender-posture.bicep
 ```
 
 ## Architecture
 
 ### Three-Layer Foundry Architecture
 
-The Foundry workload is split across three layers:
-
 ```
-Bicep (infra/)              Python SDK (scripts/)          PowerShell (modules/)
-──────────────────          ─────────────────────          ─────────────────────
-foundry-core.bicep          foundry_tools.py               FoundryInfra.psm1
- RG, account, model,         Connection setup,              Teams packages,
- project, embeddings          tool definition builder        Bot Services,
-foundry-eval-infra.bicep    foundry_knowledge.py             Teams catalog
- AI Search, Bing,             Demo doc upload,
- App Insights, Log Analytics  vector store creation
-bot-services.bicep          foundry_agents.py
- Storage, Function App,       Agent CRUD with tools,
- role assignments              governance, app publishing
-bot-per-agent.bicep         foundry_evals.py
- Bot Service, Teams channel    Prompt optimization,
-                               batch/continuous eval,
-                               custom evaluators
+PowerShell (modules/)           Python SDK (scripts/)          Bicep (infra/)
+─────────────────────           ─────────────────────          ──────────────────
+FoundryInfra.psm1               foundry_tools.py               foundry-eval-infra.bicep
+ ARM REST: RG, account,          Project connections,           AI Search, App Insights,
+ model, project                  tool definition builder        Log Analytics
+ Teams packages,                foundry_knowledge.py           bot-services.bicep
+ Bot Services,                   Demo doc upload,               Storage, Function App,
+ Teams catalog                   vector store creation          role assignments
+                                foundry_agents.py              bot-per-agent.bicep
+                                 Agent CRUD with tools,         Bot Service, Teams channel
+                                 app publishing                defender-posture.bicep
+                                foundry_evals.py                MDC pricing tiers
+                                 Prompt optimization,
+                                 batch / continuous eval,
+                                 custom evaluators
 ```
 
 **Deployment flow:**
-1. Bicep (ARM + eval infra + embeddings) -> outputs `projectEndpoint`, `aiSearchEndpoint`
-2. `foundry_tools.py` creates connections (AI Search, Bing, Blob)
-3. `foundry_knowledge.py` uploads demo docs, creates vector stores -> returns vector store IDs
-4. `foundry_tools.py` builds tool definitions per agent (injecting vector store IDs + connection IDs)
-5. `foundry_agents.py` creates agents WITH tools, publishes apps -> returns `baseUrl`
-6. PowerShell: Teams packages + Bot Services + Teams catalog
-7. `foundry_evals.py` runs prompt optimization, batch eval (quality+safety), continuous eval
+1. `Deploy-FoundryBicep` (in `FoundryInfra.psm1`) creates RG, account, gpt-4o model,
+   embeddings model, and the project via direct ARM REST
+   (`api-version=2026-01-15-preview`). Then deploys `foundry-eval-infra.bicep`
+   to the RG for AI Search / App Insights / Log Analytics.
+2. `foundry_tools.py setup-connections` creates project connections via ARM
+   control plane (`accounts/projects/connections`). Data-plane `/connections`
+   returns HTTP 405.
+3. `foundry_knowledge.py upload` uploads demo docs, creates vector stores,
+   returns vector store IDs.
+4. `foundry_tools.py build-tools` builds per-agent tool definition dicts,
+   injecting vector store IDs + connection IDs.
+5. `foundry_agents.py deploy` creates agents via `azure-ai-projects` SDK and
+   publishes each as a Foundry application, returning a `baseUrl`.
+6. PowerShell: Teams declarative-agent packages + Bot Services + Teams catalog
+   publish (stable manifest id + monotonic version for idempotent reruns).
+7. `foundry_evals.py evaluate` probes the evaluations endpoint; runs prompt
+   optimization, custom evaluators, batch eval (quality+safety), and
+   continuous eval if available.
 
-`Foundry.psm1` is a thin orchestrator (~250 lines) that coordinates all three layers. The external contract (`Deploy-Foundry` / `Remove-Foundry`) is unchanged.
+`Foundry.psm1` is a thin orchestrator that coordinates all three layers. The
+external contract (`Deploy-Foundry` / `Remove-Foundry`) is unchanged.
+
+**Note:** Foundry core resources (RG/account/model/project) are created via
+pure PowerShell ARM REST rather than Bicep. The project RP has transient
+behavior that benefits from per-step retry + existence checks, and Bicep's
+`Microsoft.CognitiveServices/accounts/projects` type returned HTTP 500s
+consistently on MCAPS-governed tenants during testing. See the Known
+Constraints section.
 
 ### Orchestration Flow
 
@@ -159,6 +178,73 @@ Exceptions: `Prerequisites.psm1`, `Logging.psm1`, `Interactive.psm1`, and `Found
 - **Agent tools**: Each agent gets tools defined in `config.json` under `agents[].tools[]`. Tool definitions are built by `foundry_tools.py`, injecting runtime values (vector store IDs, connection IDs) from earlier deployment steps. Currently supports: code_interpreter, file_search, azure_ai_search, bing_grounding, openapi, azure_function, function, mcp, sharepoint_grounding, a2a, image_generation.
 - **Post-deploy evaluations**: Run automatically as Step 7 in Deploy-Foundry. Includes prompt optimization, custom evaluator creation (compliance_adherence), batch eval with synthetic data (quality + safety + agent evaluators), and continuous evaluation enablement (10% sampling).
 - **Logging**: All output goes through `Write-LabLog` (Level: Info/Warning/Error/Success) and `Write-LabStep` for visual sections. Transcripts auto-cleanup after 30 days.
+
+### Known Constraints & Tenant Requirements
+
+**MCAPS tenant policy exemption (required for Foundry).** The MCAPS
+governance policy set includes `CognitiveServices_LocalAuth_Modify` which
+forces `disableLocalAuth: true` on all Cognitive Services accounts. Foundry
+project creation requires `disableLocalAuth: false` for the capability host
+handshake. Create a policy exemption on the target resource group before
+deploying:
+
+```bash
+az policy exemption create \
+  --name "foundry-localauth-exempt" \
+  --policy-assignment "/providers/microsoft.management/managementgroups/<tenantId>/providers/microsoft.authorization/policyassignments/mcapsgovdeploypolicies" \
+  --exemption-category Waiver \
+  --scope "/subscriptions/<subId>/resourceGroups/<rgName>"
+```
+
+**Foundry project creation API.** Requires `api-version=2026-01-15-preview`
+(earlier versions 500 on MCAPS tenants) and the PUT body must include
+`kind: "AIServices"`, `identity: { type: "SystemAssigned" }`, and
+`properties.displayName`. See `Deploy-FoundryBicep` in
+`modules/FoundryInfra.psm1`.
+
+**Region.** Tested in `eastus`. Earlier attempts in `eastus2` and `centralus`
+hit either capacity (`InsufficientResourcesAvailable`) or project-RP
+errors.
+
+**Project connections are ARM resources.** Use the ARM control-plane path
+`Microsoft.CognitiveServices/accounts/projects/connections` for
+CRUD — the data-plane `<projectEndpoint>/connections` returns HTTP 405
+on PUT. `scripts/foundry_tools.py setup_connections()` uses ARM.
+
+**Bing Search connection is skipped.** The Bing Search API has been retired
+(aka.ms/BingAPIsRetirement). Foundry's built-in `bing_grounding` tool uses
+the project's managed web search with no project connection required —
+emit the tool without a `project_connection_id` field.
+
+**Blob Storage connection metadata.** `AzureBlob` connections require
+`properties.metadata.ContainerName` and `properties.metadata.AccountName`
+on PUT. The endpoint alone is rejected with HTTP 400.
+
+**SharePoint grounding tool.** Requires a `SharePoint` project connection
+pointing at a real site URL (`https://<tenant>.sharepoint.com/sites/<site>`).
+If `workloads.foundry.connections.sharePoint.siteUrl` is empty, the tool is
+skipped entirely on each agent (otherwise Foundry shows the agent as
+"missing configuration").
+
+**Agent tool schema quirks.**
+- `function` tools use a flat schema (`{type, name, description, parameters}`),
+  NOT the OpenAI Chat Completions nested `{type, function: {...}}`.
+- `sharepoint_grounding_preview`, `a2a_preview`, etc. — the nested property
+  key must match the `type` field exactly.
+
+**Teams catalog publishing is idempotent.** `New-FoundryAgentPackage` emits
+a deterministic `manifest.json` id (`MD5(prefix/shortName)` rendered as a
+GUID) and a monotonic `version` (`1.<mmdd>.<hhmmss>` UTC). `Publish-TeamsApps`
+matches existing tenant apps by `externalId`, so reruns update the existing
+app rather than creating duplicates. The publish step requires a pre-existing
+`MgContext` with `AppCatalog.ReadWrite.All` — in `-FoundryOnly` mode, the
+deploy does not connect Graph itself, so connect manually first or run a
+full deploy.
+
+**Evaluations pipeline may be unavailable.** `foundry_evals.py` probes
+`/evaluations` at startup and skips the entire pipeline with a single warning
+if the project tier doesn't expose the endpoint (returns 404). Requires
+Standard Agent Setup in Foundry.
 
 ### Config Structure
 

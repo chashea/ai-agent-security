@@ -49,8 +49,10 @@ ruff check scripts/
 python3.12 -m pytest scripts/tests/ -v
 
 # Validate Bicep
-az bicep build --file infra/foundry-core.bicep
+az bicep build --file infra/foundry-eval-infra.bicep
 az bicep build --file infra/bot-services.bicep
+az bicep build --file infra/bot-per-agent.bicep
+az bicep build --file infra/defender-posture.bicep
 ```
 
 ## Architecture
@@ -58,11 +60,23 @@ az bicep build --file infra/bot-services.bicep
 ### Three-Layer Foundry Architecture
 
 The Foundry workload uses three layers:
-- **Bicep** (`infra/`) — ARM infrastructure (account, model, project, storage, function app, bot services)
-- **Python SDK** (`scripts/foundry_agents.py`) — Agent CRUD, Purview governance, application publishing via `azure-ai-projects` SDK
-- **PowerShell** (`modules/FoundryInfra.psm1`) — Bot Services wiring, Teams packaging, catalog publishing
+- **PowerShell + ARM REST** (`modules/FoundryInfra.psm1`) — RG, Foundry account,
+  model + embeddings deployments, and the Foundry project (via direct ARM REST
+  at `api-version=2026-01-15-preview`). Also handles Bot Services wiring, Teams
+  package generation, and Teams catalog publishing.
+- **Python SDK** (`scripts/foundry_agents.py`, `foundry_tools.py`,
+  `foundry_knowledge.py`, `foundry_evals.py`) — Agent CRUD via
+  `azure-ai-projects`, project connections, knowledge base / vector stores,
+  post-deploy evaluations pipeline.
+- **Bicep** (`infra/`) — Eval infrastructure (`foundry-eval-infra.bicep`:
+  AI Search, App Insights, Log Analytics), Bot Services (`bot-services.bicep`,
+  `bot-per-agent.bicep`), and Defender for Cloud posture (`defender-posture.bicep`).
 
-`Foundry.psm1` orchestrates all three: Bicep deploy -> Python agents -> Teams packages -> Bot Services -> Teams catalog.
+Foundry core resources (account/model/project) are NOT in Bicep — the project
+RP was flaky on MCAPS-governed tenants, so the per-resource retry loop in
+`Invoke-ArmPut` ended up more reliable than nested ARM templates.
+
+`Foundry.psm1` is a thin orchestrator that coordinates all layers.
 
 ### Config Loading
 

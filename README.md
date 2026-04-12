@@ -44,7 +44,7 @@ Deploy AI agents from Azure AI Foundry and automatically wrap them with enterpri
 - Azure subscription (required for Foundry deployment)
 - Required PowerShell modules:
   - `ExchangeOnlineManagement` >= 3.0
-  - `Microsoft.Graph` (Users, Groups, Authentication)
+  - `Microsoft.Graph` (Users, Groups, Authentication, AppCatalog)
   - `Az.Accounts`
   - `PSScriptAnalyzer` (CI/lint only)
   - `Pester` >= 5.0 (tests only)
@@ -53,6 +53,47 @@ Deploy AI agents from Azure AI Foundry and automatically wrap them with enterpri
   - `azure-identity` >= 1.15.0
   - `requests` >= 2.31.0
 - Required Entra roles: Compliance Administrator, User Administrator, eDiscovery Administrator
+
+### Tenant prerequisites (MCAPS-governed tenants)
+
+If your tenant is governed by the MCAPS policy set
+(`mcapsgovdeploypolicies`), the `CognitiveServices_LocalAuth_Modify` policy
+forces `disableLocalAuth: true` on new Cognitive Services accounts and
+breaks Foundry project creation. Create a policy exemption on the target
+resource group before running `Deploy.ps1`:
+
+```bash
+az policy exemption create \
+  --name "foundry-localauth-exempt" \
+  --policy-assignment "/providers/microsoft.management/managementgroups/<tenantId>/providers/microsoft.authorization/policyassignments/mcapsgovdeploypolicies" \
+  --exemption-category Waiver \
+  --scope "/subscriptions/<subId>/resourceGroups/<rgName>"
+```
+
+### Region
+
+Foundry core resources are deployed to `eastus` by default (set via
+`workloads.foundry.location` in `config.json`). Other regions may hit
+capacity limits or project-RP issues.
+
+### Publishing agents to Teams / Microsoft 365 Copilot
+
+The Teams catalog publish step (`Publish-TeamsApps`) requires an existing
+`Microsoft.Graph` context with the `AppCatalog.ReadWrite.All` scope. In
+`-FoundryOnly` mode the deploy does not connect Graph itself, so either:
+
+- **Pre-connect Graph** then run the FoundryOnly deploy in the same session:
+  ```powershell
+  Connect-MgGraph -Scopes 'AppCatalog.ReadWrite.All' -TenantId <tenantId> -NoWelcome
+  ./Deploy.ps1 -ConfigPath config.json -FoundryOnly -TenantId <tenantId>
+  ```
+- **Or run a full deploy** (without `-FoundryOnly`) which connects Graph
+  as part of its auth step.
+
+Reruns are idempotent — the Teams manifest uses a deterministic `id`
+(MD5 of prefix + shortName) and a monotonic `version`
+(`1.<mmdd>.<hhmmss>` UTC), so subsequent deploys update the existing
+tenant app rather than creating duplicates.
 
 ## Quick start
 
@@ -103,9 +144,12 @@ Each workload under `workloads` has an `enabled` boolean. Set to `false` to skip
 Deployment order (dependency-driven):
 
 The Foundry workload uses a three-layer architecture:
-- **Bicep** (`infra/`) for ARM infrastructure (account, model, project, bot services)
-- **Python SDK** (`scripts/foundry_agents.py`) for agent CRUD and application publishing
-- **PowerShell** for orchestration, Teams packaging, and catalog publishing
+- **PowerShell + ARM REST** (`modules/FoundryInfra.psm1`) for Foundry account,
+  model deployments, and project creation (direct ARM REST at
+  `api-version=2026-01-15-preview`), plus Teams packaging and catalog publishing
+- **Python SDK** (`scripts/*.py`) for agent CRUD, project connections,
+  knowledge base / vector stores, and post-deploy evaluations
+- **Bicep** (`infra/`) for eval infrastructure, Bot Services, and Defender posture
 
 ```
 1. Foundry          — agents + Defender for Cloud posture
@@ -123,3 +167,10 @@ The Foundry workload uses a three-layer architecture:
 ```
 
 Removal runs the exact reverse order. A deployment manifest (`manifests/`) captures all created resource IDs and is used for precise teardown.
+
+## Troubleshooting
+
+See [`docs/troubleshooting.md`](docs/troubleshooting.md) for a catalog of
+errors encountered on MCAPS-governed tenants and the fixes for each.
+Covers Foundry project RP quirks, connection API gotchas, Teams catalog
+publish idempotency, and more.
