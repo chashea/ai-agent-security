@@ -181,6 +181,20 @@ def setup_connections(config: dict) -> dict:
             if conn:
                 result["blobStorage"] = conn
 
+    # SharePoint connection — required for the sharepoint_grounding tool.
+    # Needs a siteUrl like https://<tenant>.sharepoint.com/sites/<site>.
+    if "sharePoint" in connections_cfg:
+        sp = connections_cfg["sharePoint"]
+        site_url = sp.get("siteUrl", "")
+        if not site_url:
+            log.warning(
+                "SharePoint connection skipped: sharePoint.siteUrl is required."
+            )
+        else:
+            conn = _create(f"{prefix}-sharepoint", "SharePoint", site_url)
+            if conn:
+                result["sharePoint"] = conn
+
     return {"connections": result}
 
 
@@ -308,7 +322,19 @@ def build_tool_definitions(
 
         elif tool_type == "sharepoint_grounding":
             # Nested key must match type (sharepoint_grounding_preview).
+            # Prefer an explicit per-tool connectionId, fall back to the shared
+            # project SharePoint connection. Skip the tool entirely if neither
+            # is available — Foundry surfaces "missing configuration" on the
+            # agent when an empty connection_id is passed.
             conn_id = tool.get("connectionId", "")
+            if not conn_id and connection_ids and "sharePoint" in connection_ids:
+                conn_id = connection_ids["sharePoint"].get("id", "")
+            if not conn_id:
+                log.warning(
+                    "sharepoint_grounding tool skipped: no SharePoint connection "
+                    "configured (set workloads.foundry.connections.sharePoint.siteUrl)."
+                )
+                continue
             definitions.append({
                 "type": "sharepoint_grounding_preview",
                 "sharepoint_grounding_preview": {

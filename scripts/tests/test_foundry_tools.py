@@ -156,6 +156,31 @@ class TestBuildToolDefinitions:
         result = build_tool_definitions([{"type": "image_generation"}])
         assert result == [{"type": "image_generation"}]
 
+    def test_sharepoint_grounding_with_project_connection(self):
+        # Uses the shared project SharePoint connection from connection_ids
+        connection_ids = {"sharePoint": {"id": "conn-sp-123"}}
+        result = build_tool_definitions(
+            [{"type": "sharepoint_grounding"}],
+            connection_ids=connection_ids,
+        )
+        assert len(result) == 1
+        tool = result[0]
+        assert tool["type"] == "sharepoint_grounding_preview"
+        assert tool["sharepoint_grounding_preview"]["connections"][0]["connection_id"] == "conn-sp-123"
+
+    def test_sharepoint_grounding_with_inline_connection(self):
+        # Agent-level connectionId takes precedence over the shared one
+        result = build_tool_definitions(
+            [{"type": "sharepoint_grounding", "connectionId": "conn-inline-999"}],
+        )
+        assert len(result) == 1
+        assert result[0]["sharepoint_grounding_preview"]["connections"][0]["connection_id"] == "conn-inline-999"
+
+    def test_sharepoint_grounding_skipped_when_no_connection(self):
+        # No connection configured → tool is skipped, not emitted with empty ID
+        result = build_tool_definitions([{"type": "sharepoint_grounding"}])
+        assert result == []
+
     def test_mcp_tool(self):
         mcp_def = {
             "type": "mcp",

@@ -188,7 +188,15 @@ function Deploy-Foundry {
         }
         if ($fw.connections.PSObject.Properties['blobStorage']) {
             $storageEndpoint = "https://pvfoundrybot$($subscriptionId.Replace('-','').Substring(24,8).ToLower()).blob.core.windows.net"
-            $connInput['connections']['blobStorage'] = @{ endpoint = $storageEndpoint }
+            $connInput['connections']['blobStorage'] = @{
+                endpoint = $storageEndpoint
+                containerName = if ($fw.connections.blobStorage.PSObject.Properties['containerName']) { [string]$fw.connections.blobStorage.containerName } else { 'aisec-vectorstores' }
+            }
+        }
+        if ($fw.connections.PSObject.Properties['sharePoint']) {
+            $connInput['connections']['sharePoint'] = @{
+                siteUrl = [string]$fw.connections.sharePoint.siteUrl
+            }
         }
 
         try {

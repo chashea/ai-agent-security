@@ -20,6 +20,9 @@
         "bingSearch": {},
         "blobStorage": {
           "containerName": "aisec-vectorstores"
+        },
+        "sharePoint": {
+          "siteUrl": ""
         }
       },
       "knowledgeBase": {
