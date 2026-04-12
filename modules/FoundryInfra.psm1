@@ -200,7 +200,9 @@ function Deploy-FoundryBicep {
         throw "Bicep deployment failed: $deployOutput"
     }
 
-    $deployResult = $deployOutput | ConvertFrom-Json
+    # az cli may emit WARNING lines to stderr that get merged via 2>&1; strip them before parsing JSON
+    $jsonText = ($deployOutput | Where-Object { $_ -is [string] -and $_ -notmatch '^(WARNING|ERROR):' }) -join "`n"
+    $deployResult = $jsonText | ConvertFrom-Json
     $outputs      = $deployResult.properties.outputs
 
     Write-LabLog -Message "Bicep complete: account=$accountName, models deployed." -Level Success

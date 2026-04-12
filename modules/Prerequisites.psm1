@@ -107,41 +107,49 @@ function Connect-LabServices {
         [string]$TenantId,
 
         [Parameter()]
+        [switch]$SkipExchange,
+
+        [Parameter()]
+        [switch]$SkipGraph,
+
+        [Parameter()]
         [switch]$ConnectAzure,
 
         [Parameter()]
         [string]$AzureSubscriptionId
     )
 
-    $graphScopes = @(
-        'User.ReadWrite.All'
-        'Group.ReadWrite.All'
-        'Mail.Send'
-        'Organization.Read.All'
-        'Policy.ReadWrite.ConditionalAccess'
-        'Policy.Read.All'
-        'Application.ReadWrite.All'
-        'CloudAppSecurity.ReadWrite.All'
-        'eDiscovery.ReadWrite.All'
-    )
-
-    Write-Verbose "Connecting to Security & Compliance PowerShell (tenant: $TenantId)..."
-    Connect-IPPSSession -CommandName * -WarningAction SilentlyContinue -ErrorAction Stop
-
-    Write-Verbose "Connecting to Microsoft Graph (tenant: $TenantId)..."
-    Disconnect-MgGraph -ErrorAction SilentlyContinue
-    # Use device code auth when interactive browser is unavailable (CI, background processes)
-    try {
-        Connect-MgGraph -TenantId $TenantId -Scopes $graphScopes -NoWelcome -ErrorAction Stop
-    }
-    catch {
-        Write-LabLog -Message 'Browser auth failed — falling back to device code flow.' -Level Warning
-        Connect-MgGraph -TenantId $TenantId -Scopes $graphScopes -NoWelcome -UseDeviceCode -ErrorAction Stop
+    if (-not $SkipExchange) {
+        Write-Verbose "Connecting to Security & Compliance PowerShell (tenant: $TenantId)..."
+        Connect-IPPSSession -CommandName * -WarningAction SilentlyContinue -ErrorAction Stop
     }
 
-    $graphContext = Get-MgContext
-    if (-not $graphContext -or [string]::IsNullOrWhiteSpace($graphContext.Account)) {
-        throw 'Microsoft Graph authentication did not produce a usable context.'
+    if (-not $SkipGraph) {
+        $graphScopes = @(
+            'User.ReadWrite.All'
+            'Group.ReadWrite.All'
+            'Organization.Read.All'
+            'Policy.ReadWrite.ConditionalAccess'
+            'Policy.Read.All'
+            'CloudAppSecurity.Read.All'
+            'eDiscovery.ReadWrite.All'
+            'AppCatalog.ReadWrite.All'
+        )
+
+        Write-Verbose "Connecting to Microsoft Graph (tenant: $TenantId)..."
+        Disconnect-MgGraph -ErrorAction SilentlyContinue
+        try {
+            Connect-MgGraph -TenantId $TenantId -Scopes $graphScopes -NoWelcome -ErrorAction Stop
+        }
+        catch {
+            Write-LabLog -Message 'Browser auth failed — falling back to device code flow.' -Level Warning
+            Connect-MgGraph -TenantId $TenantId -Scopes $graphScopes -NoWelcome -UseDeviceCode -ErrorAction Stop
+        }
+
+        $graphContext = Get-MgContext
+        if (-not $graphContext -or [string]::IsNullOrWhiteSpace($graphContext.Account)) {
+            throw 'Microsoft Graph authentication did not produce a usable context.'
+        }
     }
 
     if ($ConnectAzure) {

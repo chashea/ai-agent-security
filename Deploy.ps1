@@ -159,23 +159,27 @@ try {
         }
 
         Write-LabStep -StepName 'Auth' -Description 'Connecting to cloud services'
+        $needsPurview = -not $FoundryOnly
         $azureSubscriptionId = if ($deployFoundry -and $Config.workloads.foundry.PSObject.Properties['subscriptionId']) {
             [string]$Config.workloads.foundry.subscriptionId
         }
         else { $null }
-        Connect-LabServices -TenantId $TenantId -ConnectAzure:$deployFoundry -AzureSubscriptionId $azureSubscriptionId
-        $connectMsg = if ($deployFoundry) {
-            'Connected to Exchange Online, Microsoft Graph, and Azure.'
-        }
-        else {
-            'Connected to Exchange Online and Microsoft Graph.'
-        }
-        Write-LabLog -Message $connectMsg -Level Success
+        Connect-LabServices -TenantId $TenantId `
+            -SkipExchange:(-not $needsPurview) `
+            -SkipGraph:(-not $needsPurview) `
+            -ConnectAzure:$deployFoundry `
+            -AzureSubscriptionId $azureSubscriptionId
+        $services = [System.Collections.Generic.List[string]]::new()
+        if ($needsPurview) { $services.Add('Exchange Online'); $services.Add('Microsoft Graph') }
+        if ($deployFoundry) { $services.Add('Azure') }
+        Write-LabLog -Message "Connected to $($services -join ', ')." -Level Success
 
-        $resolvedDomain = Resolve-LabTenantDomain -ConfiguredDomain $Config.domain
-        if (-not [string]::Equals($resolvedDomain, [string]$Config.domain, [System.StringComparison]::OrdinalIgnoreCase)) {
-            Write-LabLog -Message "Configured domain '$($Config.domain)' is not verified in this tenant. Using '$resolvedDomain'." -Level Warning
-            $Config.domain = $resolvedDomain
+        if ($needsPurview) {
+            $resolvedDomain = Resolve-LabTenantDomain -ConfiguredDomain $Config.domain
+            if (-not [string]::Equals($resolvedDomain, [string]$Config.domain, [System.StringComparison]::OrdinalIgnoreCase)) {
+                Write-LabLog -Message "Configured domain '$($Config.domain)' is not verified in this tenant. Using '$resolvedDomain'." -Level Warning
+                $Config.domain = $resolvedDomain
+            }
         }
     }
     else {
