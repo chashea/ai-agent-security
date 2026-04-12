@@ -542,10 +542,19 @@ function New-FoundryAgentPackage {
     if (Test-Path $zipPath) { Remove-Item $zipPath -Force }
     New-Item -ItemType Directory -Path $pkgDir -Force | Out-Null
 
-    # manifest.json
+    # manifest.json — deterministic GUID from prefix + shortName so reruns
+    # update the existing tenant app (matched by externalId) instead of
+    # creating a duplicate every time.
+    $idSeed     = "$Prefix/$shortName".ToLowerInvariant()
+    $md5        = [System.Security.Cryptography.MD5]::Create()
+    try {
+        $hashBytes = $md5.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($idSeed))
+    } finally { $md5.Dispose() }
+    $stableId = [guid]::new($hashBytes).ToString()
+
     $teamsManifest = [ordered]@{
         '$schema'       = 'https://developer.microsoft.com/json-schemas/teams/v1.19/MicrosoftTeams.schema.json'
-        manifestVersion = '1.19'; version = '1.0.0'; id = [string][System.Guid]::NewGuid()
+        manifestVersion = '1.19'; version = '1.0.0'; id = $stableId
         developer       = [ordered]@{ name = 'Contoso'; websiteUrl = 'https://contoso.com'; privacyUrl = 'https://contoso.com/privacy'; termsOfUseUrl = 'https://contoso.com/terms' }
         name            = [ordered]@{ short = $shortName; full = "$Prefix $shortName" }
         description     = [ordered]@{ short = $descShort; full = "$description — powered by Microsoft Foundry + Purview AI Governance" }
