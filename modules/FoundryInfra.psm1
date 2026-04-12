@@ -1054,8 +1054,26 @@ function Publish-TeamsApps {
             $agentName = [string]$agent.name
             $shortName = $agentName -replace "^$([regex]::Escape($Config.prefix))-", ''
 
-            $existing = if ($catalogApps) {
-                $catalogApps | Where-Object { $_.appDefinitions | Where-Object { $_.displayName -eq $shortName } } | Select-Object -First 1
+            # Read the package's manifest.json id (externalId). Matching on this
+            # rather than displayName avoids collisions with unrelated tenant
+            # apps that happen to share a name.
+            $manifestId = $null
+            try {
+                Add-Type -AssemblyName System.IO.Compression.FileSystem -ErrorAction SilentlyContinue
+                $zip = [System.IO.Compression.ZipFile]::OpenRead($pkgPath)
+                try {
+                    $entry = $zip.Entries | Where-Object { $_.Name -eq 'manifest.json' } | Select-Object -First 1
+                    if ($entry) {
+                        $reader = New-Object System.IO.StreamReader($entry.Open())
+                        $manifestJson = $reader.ReadToEnd() | ConvertFrom-Json
+                        $reader.Dispose()
+                        $manifestId = [string]$manifestJson.id
+                    }
+                } finally { $zip.Dispose() }
+            } catch { Write-LabLog -Message "Could not read manifest.json from $pkgPath : $($_.Exception.Message)" -Level Warning }
+
+            $existing = if ($catalogApps -and $manifestId) {
+                $catalogApps | Where-Object { [string]$_.externalId -eq $manifestId } | Select-Object -First 1
             } else { $null }
 
             try {
