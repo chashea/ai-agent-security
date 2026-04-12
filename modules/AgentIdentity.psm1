@@ -239,14 +239,22 @@ function Deploy-AgentIdentity {
         $assignmentId = [guid]::NewGuid().ToString()
         $assignmentUri = "https://management.azure.com$scope/providers/Microsoft.Authorization/roleAssignments/$assignmentId`?api-version=$($script:AuthApiVersion)"
 
-        # Check if assignment already exists (idempotent)
-        $existingUri = "https://management.azure.com$scope/providers/Microsoft.Authorization/roleAssignments?api-version=$($script:AuthApiVersion)&`$filter=principalId eq '$principalId' and roleDefinitionId eq '$roleDefId'"
+        # Check if assignment already exists (idempotent). ARM only supports
+        # 'atScope()', 'principalId eq', or 'assignedTo()' filters — combining
+        # fields is not supported, so filter by principalId server-side and
+        # match roleDefinitionId client-side.
+        $existingUri = "https://management.azure.com$scope/providers/Microsoft.Authorization/roleAssignments?api-version=$($script:AuthApiVersion)&`$filter=principalId eq '$principalId'"
         $existing = Invoke-ArmGet -Uri $existingUri -Token $armToken
-        if ($existing -and $existing.value -and $existing.value.Count -gt 0) {
-            $existId = [string]$existing.value[0].id
+        $existingMatch = $null
+        if ($existing -and $existing.value) {
+            $existingMatch = $existing.value | Where-Object {
+                [string]$_.properties.roleDefinitionId -eq $roleDefId
+            } | Select-Object -First 1
+        }
+        if ($existingMatch) {
             Write-LabLog -Message "AgentIdentity: $($req.roleName) already assigned on $($req.scopeType) — skipping" -Level Info
             $assignedRoles.Add(@{
-                id               = $existId
+                id               = [string]$existingMatch.id
                 roleName         = $req.roleName
                 roleDefinitionId = $req.roleDefinitionId
                 scope            = $scope

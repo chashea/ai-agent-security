@@ -21,6 +21,7 @@
 
 $script:AgentApiVersion = '2025-05-15-preview'
 $script:AppApiVersion   = '2025-10-01-preview'
+$script:EvalApiVersion  = '2025-11-15-preview'
 
 # Import infrastructure module
 $infraPath = if ($PSScriptRoot) { Join-Path $PSScriptRoot 'FoundryInfra.psm1' }
@@ -163,6 +164,7 @@ function Deploy-Foundry {
         prefix          = $prefix
         agentApiVersion = $script:AgentApiVersion
         appApiVersion   = $script:AppApiVersion
+        armApiVersion   = '2026-01-15-preview'
     }
 
     # ── Step 2: Set up project connections ────────────────────────────────────
@@ -335,6 +337,7 @@ function Deploy-Foundry {
         Write-LabStep -StepName 'Evaluations' -Description 'Running post-deploy evaluations (prompt optimization, batch eval, continuous eval)'
 
         $evalInput = [ordered]@{} + $pythonBase
+        $evalInput['evalApiVersion'] = $script:EvalApiVersion
         $evalInput['modelDeploymentName'] = $modelDeployName
         $evalInput['agents'] = @($manifest.agents | ForEach-Object {
             [ordered]@{

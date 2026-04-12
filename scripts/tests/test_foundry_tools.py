@@ -115,10 +115,12 @@ class TestBuildToolDefinitions:
         result = build_tool_definitions([func_def])
         assert len(result) == 1
         tool = result[0]
+        # Foundry prompt agents use a flat function schema: name/description/parameters
+        # at the tool level, not nested under "function".
         assert tool["type"] == "function"
-        assert tool["function"]["name"] == "get_policy"
-        assert tool["function"]["description"] == "Retrieve a compliance policy"
-        assert "parameters" in tool["function"]
+        assert tool["name"] == "get_policy"
+        assert tool["description"] == "Retrieve a compliance policy"
+        assert "parameters" in tool
 
     def test_openapi_tool(self):
         openapi_def = {
@@ -168,6 +170,20 @@ class TestBuildToolDefinitions:
 
 
 class TestSetupConnections:
+    @staticmethod
+    def _base_config():
+        return {
+            "subscriptionId": "00000000-0000-0000-0000-000000000000",
+            "resourceGroup": "rg-test",
+            "accountName": "test-account",
+            "projectName": "test-project",
+            "armApiVersion": "2026-01-15-preview",
+            "prefix": "AISec",
+            "connections": {
+                "aiSearch": {"endpoint": "https://search.search.windows.net"},
+            },
+        }
+
     @patch("foundry_tools.DefaultAzureCredential")
     @patch("foundry_tools.requests.put")
     @patch("foundry_tools.requests.get")
@@ -179,15 +195,7 @@ class TestSetupConnections:
             json=MagicMock(return_value={"id": "conn-new-123"}),
         )
 
-        config = {
-            "projectEndpoint": "https://endpoint",
-            "agentApiVersion": "2025-05-15-preview",
-            "prefix": "AISec",
-            "connections": {
-                "aiSearch": {"endpoint": "https://search.search.windows.net"},
-            },
-        }
-        result = setup_connections(config)
+        result = setup_connections(self._base_config())
         assert "aiSearch" in result["connections"]
         assert result["connections"]["aiSearch"]["id"] == "conn-new-123"
         mock_put.assert_called_once()
@@ -201,32 +209,26 @@ class TestSetupConnections:
             json=MagicMock(return_value={"id": "existing-conn-id"}),
         )
 
-        config = {
-            "projectEndpoint": "https://endpoint",
-            "agentApiVersion": "2025-05-15-preview",
-            "prefix": "AISec",
-            "connections": {
-                "aiSearch": {"endpoint": "https://search.search.windows.net"},
-            },
-        }
-        result = setup_connections(config)
+        result = setup_connections(self._base_config())
         assert result["connections"]["aiSearch"]["id"] == "existing-conn-id"
 
-    @patch("foundry_tools.DefaultAzureCredential")
     @patch("foundry_tools.requests.put")
     @patch("foundry_tools.requests.get")
-    def test_connection_failure_returns_none(self, mock_get, mock_put, mock_cred):
-        mock_cred.return_value.get_token.return_value = MagicMock(token="fake-token")
+    def test_connection_failure_returns_none(self, mock_get, mock_put):
         mock_get.return_value = MagicMock(status_code=404)
         mock_put.return_value = MagicMock(status_code=400, text="Bad request")
 
         result = create_connection(
-            "https://endpoint",
-            "fake-token",
-            "2025-05-15-preview",
-            "AISec-ai-search",
-            "CognitiveSearch",
-            "https://search.search.windows.net",
+            arm_base="https://management.azure.com",
+            arm_token="fake-token",
+            arm_api_version="2026-01-15-preview",
+            subscription_id="00000000-0000-0000-0000-000000000000",
+            resource_group="rg-test",
+            account_name="test-account",
+            project_name="test-project",
+            connection_name="AISec-ai-search",
+            connection_type="CognitiveSearch",
+            target="https://search.search.windows.net",
         )
         assert result is None
 

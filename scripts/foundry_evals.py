@@ -263,7 +263,9 @@ def run_evaluation_pipeline(config: dict) -> dict:
     data_token = _get_token(credential, "https://ai.azure.com/.default")
 
     project_endpoint = config["projectEndpoint"]
-    api_version = config.get("agentApiVersion", "2025-05-15-preview")
+    # Evaluation endpoints (evaluators, evaluations, prompt-optimizations,
+    # continuous-evaluation) require a newer api-version than the agents API.
+    api_version = config.get("evalApiVersion", "2025-11-15-preview")
     agents = config.get("agents", [])
     eval_config = config.get("evaluations", {})
     model_deployment = config.get("modelDeploymentName", "gpt-4o")

@@ -37,17 +37,32 @@ def _data_headers(token: str) -> dict:
 
 
 def create_connection(
-    project_endpoint: str,
-    data_token: str,
-    agent_api_version: str,
+    arm_base: str,
+    arm_token: str,
+    arm_api_version: str,
+    subscription_id: str,
+    resource_group: str,
+    account_name: str,
+    project_name: str,
     connection_name: str,
     connection_type: str,
     target: str,
     credentials: dict | None = None,
 ) -> dict | None:
-    """Create a project connection. Returns connection dict or None."""
-    url = f"{project_endpoint}/connections/{connection_name}?api-version={agent_api_version}"
-    headers = _data_headers(data_token)
+    """Create a project connection via the ARM control plane.
+
+    Foundry project connections live under the ARM resource
+    Microsoft.CognitiveServices/accounts/projects/connections — the data-plane
+    /connections endpoint returns 405 (Method Not Allowed) on PUT/POST.
+    """
+    url = (
+        f"{arm_base}/subscriptions/{subscription_id}"
+        f"/resourceGroups/{resource_group}"
+        f"/providers/Microsoft.CognitiveServices/accounts/{account_name}"
+        f"/projects/{project_name}/connections/{connection_name}"
+        f"?api-version={arm_api_version}"
+    )
+    headers = _arm_headers(arm_token)
 
     # Check if exists
     check = requests.get(url, headers=headers)
@@ -81,55 +96,56 @@ def create_connection(
     return None
 
 
+def _arm_headers(token: str) -> dict:
+    return {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+
+
 def setup_connections(config: dict) -> dict:
     """Create all project connections from config. Returns connection IDs."""
     credential = DefaultAzureCredential()
-    data_token = _get_token(credential, "https://ai.azure.com/.default")
+    arm_token = _get_token(credential, "https://management.azure.com/.default")
 
-    project_endpoint = config["projectEndpoint"]
-    api_version = config.get("agentApiVersion", "2025-05-15-preview")
+    arm_base = "https://management.azure.com"
+    arm_api_version = config.get("armApiVersion", "2026-01-15-preview")
+    subscription_id = config["subscriptionId"]
+    resource_group = config["resourceGroup"]
+    account_name = config["accountName"]
+    project_name = config["projectName"]
     connections_cfg = config.get("connections", {})
     prefix = config.get("prefix", "AISec")
     result = {}
 
+    def _create(name: str, category: str, target: str) -> dict | None:
+        return create_connection(
+            arm_base=arm_base,
+            arm_token=arm_token,
+            arm_api_version=arm_api_version,
+            subscription_id=subscription_id,
+            resource_group=resource_group,
+            account_name=account_name,
+            project_name=project_name,
+            connection_name=name,
+            connection_type=category,
+            target=target,
+        )
+
     # AI Search connection
     if "aiSearch" in connections_cfg:
         ai_search = connections_cfg["aiSearch"]
-        conn = create_connection(
-            project_endpoint,
-            data_token,
-            api_version,
-            f"{prefix}-ai-search",
-            "CognitiveSearch",
-            ai_search.get("endpoint", ""),
-        )
+        conn = _create(f"{prefix}-ai-search", "CognitiveSearch", ai_search.get("endpoint", ""))
         if conn:
             result["aiSearch"] = conn
 
     # Bing Search connection
     if "bingSearch" in connections_cfg:
-        conn = create_connection(
-            project_endpoint,
-            data_token,
-            api_version,
-            f"{prefix}-bing-search",
-            "BingSearch",
-            "https://api.bing.microsoft.com/",
-        )
+        conn = _create(f"{prefix}-bing-search", "BingSearch", "https://api.bing.microsoft.com/")
         if conn:
             result["bingSearch"] = conn
 
     # Blob Storage connection
     if "blobStorage" in connections_cfg:
         blob = connections_cfg["blobStorage"]
-        conn = create_connection(
-            project_endpoint,
-            data_token,
-            api_version,
-            f"{prefix}-blob-storage",
-            "AzureBlob",
-            blob.get("endpoint", ""),
-        )
+        conn = _create(f"{prefix}-blob-storage", "AzureBlob", blob.get("endpoint", ""))
         if conn:
             result["blobStorage"] = conn
 
@@ -239,15 +255,14 @@ def build_tool_definitions(
             })
 
         elif tool_type == "function":
+            # Foundry prompt agents use a flat function schema (not OpenAI Chat
+            # Completions style): name/description/parameters at the tool level.
             func_cfg = tool.get("function", tool.get("config", {}))
             definitions.append({
                 "type": "function",
-                "function": {
-                    "name": func_cfg.get("name", ""),
-                    "description": func_cfg.get("description", ""),
-                    "parameters": func_cfg.get("parameters", {}),
-                    "strict": func_cfg.get("strict", True),
-                },
+                "name": func_cfg.get("name", ""),
+                "description": func_cfg.get("description", ""),
+                "parameters": func_cfg.get("parameters", {}),
             })
 
         elif tool_type == "mcp":
@@ -260,10 +275,11 @@ def build_tool_definitions(
             })
 
         elif tool_type == "sharepoint_grounding":
+            # Nested key must match type (sharepoint_grounding_preview).
             conn_id = tool.get("connectionId", "")
             definitions.append({
                 "type": "sharepoint_grounding_preview",
-                "sharepoint_grounding": {
+                "sharepoint_grounding_preview": {
                     "connections": [{"connection_id": conn_id}]
                 },
             })
@@ -282,7 +298,7 @@ def build_tool_definitions(
             if a2a_agents:
                 definitions.append({
                     "type": "a2a_preview",
-                    "a2a": a2a_agents[0] if len(a2a_agents) == 1 else a2a_agents[0],
+                    "a2a_preview": {"agents": a2a_agents},
                 })
 
         elif tool_type == "image_generation":
