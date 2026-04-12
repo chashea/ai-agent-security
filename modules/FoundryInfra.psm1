@@ -552,9 +552,15 @@ function New-FoundryAgentPackage {
     } finally { $md5.Dispose() }
     $stableId = [guid]::new($hashBytes).ToString()
 
+    # Manifest version must be monotonically increasing for each update —
+    # Graph returns 409 "Update tenant app definition manifest version exists"
+    # otherwise. Encode as 1.<mmdd>.<hhmmss>.
+    $now = [datetime]::UtcNow
+    $pkgVersion = '1.{0:MMdd}.{0:HHmmss}' -f $now
+
     $teamsManifest = [ordered]@{
         '$schema'       = 'https://developer.microsoft.com/json-schemas/teams/v1.19/MicrosoftTeams.schema.json'
-        manifestVersion = '1.19'; version = '1.0.0'; id = $stableId
+        manifestVersion = '1.19'; version = $pkgVersion; id = $stableId
         developer       = [ordered]@{ name = 'Contoso'; websiteUrl = 'https://contoso.com'; privacyUrl = 'https://contoso.com/privacy'; termsOfUseUrl = 'https://contoso.com/terms' }
         name            = [ordered]@{ short = $shortName; full = "$Prefix $shortName" }
         description     = [ordered]@{ short = $descShort; full = "$description — powered by Microsoft Foundry + Purview AI Governance" }
