@@ -291,6 +291,7 @@ class TestContinuousEvaluation:
 
 
 class TestEvalPipeline:
+    @patch("foundry_evals._evaluations_available", return_value=True)
     @patch("foundry_evals.enable_continuous_evaluation")
     @patch("foundry_evals.run_batch_evaluation")
     @patch("foundry_evals.create_custom_evaluator")
@@ -305,6 +306,7 @@ class TestEvalPipeline:
         mock_evaluator,
         mock_batch,
         mock_cont,
+        mock_available,
         pipeline_config,
     ):
         mock_cred.return_value = MagicMock()

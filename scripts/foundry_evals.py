@@ -257,6 +257,19 @@ def enable_continuous_evaluation(
 # ── Full Evaluation Pipeline ─────────────────────────────────────────────────
 
 
+def _evaluations_available(project_endpoint: str, data_token: str, api_version: str) -> bool:
+    """Probe whether the evaluations/prompt-optimization endpoints exist on this
+    project. Some Foundry project tiers/regions don't expose them, in which case
+    every call returns 404 and we should skip the entire pipeline instead of
+    spamming warnings."""
+    url = f"{project_endpoint}/evaluations?api-version={api_version}"
+    try:
+        resp = requests.get(url, headers=_data_headers(data_token), timeout=10)
+        return resp.status_code != 404
+    except Exception:
+        return False
+
+
 def run_evaluation_pipeline(config: dict) -> dict:
     """Run the complete post-deploy evaluation pipeline."""
     credential = DefaultAzureCredential()
@@ -276,6 +289,13 @@ def run_evaluation_pipeline(config: dict) -> dict:
         "batchEvaluations": [],
         "continuousEvaluation": [],
     }
+
+    if not _evaluations_available(project_endpoint, data_token, api_version):
+        log.warning(
+            "Foundry evaluations endpoints not available on this project — skipping pipeline. "
+            "(Requires Standard Agent Setup with the evaluation service enabled.)"
+        )
+        return results
 
     # Collect all evaluator names
     batch_evaluators = eval_config.get("batchEvaluators", {})

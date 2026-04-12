@@ -1016,8 +1016,7 @@ function Publish-TeamsApps {
     [OutputType([PSCustomObject[]])]
     param(
         [Parameter(Mandatory)] [PSCustomObject]$Config,
-        [Parameter(Mandatory)] [PSCustomObject[]]$Agents,
-        [Parameter(Mandatory)] [string]$TenantId
+        [Parameter(Mandatory)] [PSCustomObject[]]$Agents
     )
 
     if (-not $PSCmdlet.ShouldProcess("Teams app catalog for '$($Config.prefix)'", 'Publish')) {
@@ -1027,9 +1026,18 @@ function Publish-TeamsApps {
     Write-LabLog -Message 'Publishing agent packages to Teams app catalog...' -Level Info
     $published = [System.Collections.Generic.List[PSCustomObject]]::new()
 
-    try {
-        Connect-MgGraph -Scopes 'AppCatalog.ReadWrite.All' -TenantId $TenantId -NoWelcome -ErrorAction Stop
+    # Require an existing Graph context with the right scope. In -FoundryOnly
+    # mode Graph isn't connected at startup, and attempting to Connect-MgGraph
+    # here blocks on interactive browser auth and then times out.
+    $mgContext = $null
+    try { $mgContext = Get-MgContext -ErrorAction SilentlyContinue } catch { $mgContext = $null }
+    $hasScope = $mgContext -and ($mgContext.Scopes -contains 'AppCatalog.ReadWrite.All')
+    if (-not $hasScope) {
+        Write-LabLog -Message 'Teams catalog publish skipped: Microsoft Graph not connected with AppCatalog.ReadWrite.All (run without -FoundryOnly to publish).' -Level Warning
+        return @()
+    }
 
+    try {
         $catalogApps = $null
         try {
             $catalogResp = Invoke-MgGraphRequest -Method GET `

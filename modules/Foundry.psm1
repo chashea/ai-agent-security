@@ -327,7 +327,7 @@ function Deploy-Foundry {
 
     # Teams catalog
     Write-LabStep -StepName 'Teams Catalog' -Description 'Publishing to Teams app catalog'
-    $publishedApps = Publish-TeamsApps -Config $Config -Agents $manifest.agents -TenantId $tenantId
+    $publishedApps = Publish-TeamsApps -Config $Config -Agents $manifest.agents
     if ($publishedApps -and @($publishedApps).Count -gt 0) {
         $manifest | Add-Member -NotePropertyName 'teamsApps' -NotePropertyValue $publishedApps -Force
     }

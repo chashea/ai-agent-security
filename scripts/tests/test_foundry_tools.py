@@ -86,7 +86,7 @@ class TestBuildToolDefinitions:
         assert indexes[0]["project_connection_id"] == "conn-search-999"
         assert indexes[0]["index_name"] == "my-index"
 
-    def test_bing_grounding_tool(self):
+    def test_bing_grounding_tool_with_connection(self):
         connection_ids = {"bingSearch": {"id": "conn-bing-777"}}
         result = build_tool_definitions(
             [{"type": "bing_grounding"}],
@@ -98,6 +98,17 @@ class TestBuildToolDefinitions:
         configs = tool["bing_grounding"]["search_configurations"]
         assert len(configs) == 1
         assert configs[0]["project_connection_id"] == "conn-bing-777"
+
+    def test_bing_grounding_tool_builtin(self):
+        # No project connection — built-in Bing grounding should omit the field.
+        result = build_tool_definitions([{"type": "bing_grounding"}])
+        assert len(result) == 1
+        tool = result[0]
+        assert tool["type"] == "bing_grounding"
+        configs = tool["bing_grounding"]["search_configurations"]
+        assert len(configs) == 1
+        assert "project_connection_id" not in configs[0]
+        assert configs[0]["market"] == "en-US"
 
     def test_function_tool(self):
         func_def = {

@@ -48,6 +48,7 @@ def create_connection(
     connection_type: str,
     target: str,
     credentials: dict | None = None,
+    metadata: dict | None = None,
 ) -> dict | None:
     """Create a project connection via the ARM control plane.
 
@@ -80,6 +81,8 @@ def create_connection(
     }
     if credentials:
         body["properties"]["credentials"] = credentials
+    if metadata:
+        body["properties"]["metadata"] = metadata
 
     resp = requests.put(url, json=body, headers=headers)
     if resp.status_code < 400:
@@ -136,18 +139,47 @@ def setup_connections(config: dict) -> dict:
         if conn:
             result["aiSearch"] = conn
 
-    # Bing Search connection
-    if "bingSearch" in connections_cfg:
-        conn = _create(f"{prefix}-bing-search", "BingSearch", "https://api.bing.microsoft.com/")
-        if conn:
-            result["bingSearch"] = conn
+    # Bing Search: skipped — the Bing Search API has been retired
+    # (aka.ms/BingAPIsRetirement). Foundry's built-in bing_grounding tool uses
+    # the project's managed web search capability and does NOT require a
+    # project connection.
 
-    # Blob Storage connection
+    # Blob Storage connection — requires ContainerName + AccountName metadata,
+    # not just the target endpoint.
     if "blobStorage" in connections_cfg:
         blob = connections_cfg["blobStorage"]
-        conn = _create(f"{prefix}-blob-storage", "AzureBlob", blob.get("endpoint", ""))
-        if conn:
-            result["blobStorage"] = conn
+        container = blob.get("containerName") or blob.get("container")
+        account = blob.get("accountName")
+        if not account and blob.get("endpoint"):
+            # Derive account name from the endpoint if not provided explicitly:
+            # https://<account>.blob.core.windows.net → <account>
+            from urllib.parse import urlparse
+            host = urlparse(blob["endpoint"]).hostname or ""
+            account = host.split(".", 1)[0] if host else ""
+        if not container or not account:
+            log.warning(
+                "Blob Storage connection skipped: containerName and accountName "
+                "(or endpoint) are required.",
+            )
+        else:
+            conn = create_connection(
+                arm_base=arm_base,
+                arm_token=arm_token,
+                arm_api_version=arm_api_version,
+                subscription_id=subscription_id,
+                resource_group=resource_group,
+                account_name=account_name,
+                project_name=project_name,
+                connection_name=f"{prefix}-blob-storage",
+                connection_type="AzureBlob",
+                target=blob.get("endpoint", ""),
+                metadata={
+                    "ContainerName": container,
+                    "AccountName": account,
+                },
+            )
+            if conn:
+                result["blobStorage"] = conn
 
     return {"connections": result}
 
@@ -195,17 +227,17 @@ def build_tool_definitions(
             })
 
         elif tool_type == "bing_grounding":
-            conn_id = ""
+            # The Bing Search API has been retired (aka.ms/BingAPIsRetirement).
+            # Foundry's built-in bing_grounding uses the project's managed web
+            # search, so we only include project_connection_id if one was
+            # explicitly created (for custom / legacy Bing resources).
+            search_config: dict = {"market": "en-US", "count": 5}
             if connection_ids and "bingSearch" in connection_ids:
-                conn_id = connection_ids["bingSearch"].get("id", "")
+                search_config["project_connection_id"] = connection_ids["bingSearch"].get("id", "")
             definitions.append({
                 "type": "bing_grounding",
                 "bing_grounding": {
-                    "search_configurations": [{
-                        "project_connection_id": conn_id,
-                        "market": "en-US",
-                        "count": 5,
-                    }]
+                    "search_configurations": [search_config],
                 },
             })
 
