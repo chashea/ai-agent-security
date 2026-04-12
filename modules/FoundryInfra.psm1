@@ -11,7 +11,7 @@
     Teams declarative agent packages, and Teams app catalog publishing.
 #>
 
-$script:ArmApiVersion   = '2025-09-01'
+$script:ArmApiVersion   = '2026-01-15-preview'
 $script:AppApiVersion    = '2025-10-01-preview'
 $script:ArmBase          = 'https://management.azure.com'
 
@@ -227,6 +227,7 @@ function Deploy-FoundryBicep {
                 allowProjectManagement = $true
                 publicNetworkAccess    = 'Enabled'
                 customSubDomainName    = $accountName
+                disableLocalAuth       = $false
             }
         } | ConvertTo-Json -Depth 5 -Compress
 
@@ -303,9 +304,16 @@ function Deploy-FoundryBicep {
         $projectId = [string]$existingProject.id
     }
     else {
+        # NOTE: kind + identity are REQUIRED in the body for the project PUT to succeed
+        # under MCAPS-governed tenants. Omitting them returns HTTP 500 InternalServerError.
         $projectBody = @{
+            kind       = 'AIServices'
             location   = $location
-            properties = @{ description = 'AI Agent Security — deployed by ai-agent-security' }
+            identity   = @{ type = 'SystemAssigned' }
+            properties = @{
+                description = 'AI Agent Security — deployed by ai-agent-security'
+                displayName = $projectName
+            }
         } | ConvertTo-Json -Depth 5 -Compress
 
         $createdProject = Invoke-ArmPut -Uri $projectUri -Body $projectBody -Token $armToken -Async
