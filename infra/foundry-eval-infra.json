@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.39.26.7824",
-      "templateHash": "6419411190233293517"
+      "templateHash": "1940060464428338972"
     }
   },
   "parameters": {
@@ -13,13 +13,16 @@
       "type": "string"
     },
     "aiSearchName": {
-      "type": "string"
+      "type": "string",
+      "defaultValue": "aisec-search"
     },
     "appInsightsName": {
-      "type": "string"
+      "type": "string",
+      "defaultValue": "aisec-appinsights"
     },
     "logAnalyticsName": {
-      "type": "string"
+      "type": "string",
+      "defaultValue": "aisec-logs"
     }
   },
   "resources": [

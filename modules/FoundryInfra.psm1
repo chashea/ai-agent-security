@@ -11,7 +11,7 @@
     Teams declarative agent packages, and Teams app catalog publishing.
 #>
 
-$script:ArmApiVersion   = '2025-04-01-preview'
+$script:ArmApiVersion   = '2025-09-01'
 $script:AppApiVersion    = '2025-10-01-preview'
 $script:ArmBase          = 'https://management.azure.com'
 
@@ -168,11 +168,9 @@ function Deploy-FoundryBicep {
     $projectName    = [string]$fw.projectName
     $modelDeploy    = [string]$fw.modelDeploymentName
 
-    $bicepFile = Join-Path $PSScriptRoot '..' 'infra' 'foundry-core.bicep'
-
     $projectEndpoint = "https://$accountName.services.ai.azure.com/api/projects/$projectName"
 
-    if (-not $PSCmdlet.ShouldProcess("Foundry Bicep '$resourceGroup'", 'Deploy')) {
+    if (-not $PSCmdlet.ShouldProcess("Foundry core '$resourceGroup'", 'Deploy')) {
         return [PSCustomObject]@{
             accountId          = $null
             projectId          = $null
@@ -182,97 +180,173 @@ function Deploy-FoundryBicep {
         }
     }
 
-    # ── Phase 1: Bicep for account, models, eval infra ────────────────────────
-    Write-LabLog -Message "Deploying Bicep: foundry-core.bicep -> $resourceGroup" -Level Info
-
-    $deployOutput = az deployment sub create `
-        --location $location `
-        --template-file $bicepFile `
-        --parameters location=$location `
-                     resourceGroupName=$resourceGroup `
-                     accountName=$accountName `
-                     projectName=$projectName `
-                     modelDeploymentName=$modelDeploy `
-        --subscription $subscriptionId `
-        --output json 2>&1
-
-    if ($LASTEXITCODE -ne 0) {
-        throw "Bicep deployment failed: $deployOutput"
-    }
-
-    # az cli may emit WARNING lines to stderr that get merged via 2>&1; strip them before parsing JSON
-    $jsonText = ($deployOutput | Where-Object { $_ -is [string] -and $_ -notmatch '^(WARNING|ERROR):' }) -join "`n"
-    $deployResult = $jsonText | ConvertFrom-Json
-    $outputs      = $deployResult.properties.outputs
-
-    Write-LabLog -Message "Bicep complete: account=$accountName, models deployed." -Level Success
-
-    # ── Phase 2: Create project via direct ARM REST (not Bicep) ───────────────
-    # Project creation uses direct REST with async polling and retry because the
-    # CognitiveServices project resource provider has transient failures that
-    # require retry logic not available in Bicep templates.
-    Write-LabLog -Message "Creating Foundry project: $projectName (direct ARM REST)" -Level Info
+    # Re-assert Az context so fresh tokens point at the target subscription
+    Set-AzContext -SubscriptionId $subscriptionId -ErrorAction Stop | Out-Null
 
     $armToken    = Get-FoundryArmToken
-    $accountPath = "$($script:ArmBase)/subscriptions/$subscriptionId/resourceGroups/$resourceGroup/providers/Microsoft.CognitiveServices/accounts/$accountName"
-    $projectUri  = "$accountPath/projects/$projectName`?api-version=$($script:ArmApiVersion)"
-    $projectId   = $null
+    $subPath     = "$($script:ArmBase)/subscriptions/$subscriptionId"
+    $rgPath      = "$subPath/resourceGroups/$resourceGroup"
+    $accountPath = "$rgPath/providers/Microsoft.CognitiveServices/accounts/$accountName"
+    $modelPath   = "$accountPath/deployments/$modelDeploy"
+    $projectPath = "$accountPath/projects/$projectName"
 
-    # Check if project already exists
+    # ── 1. Resource Group ────────────────────────────────────────────────────
+    Write-LabLog -Message "Ensuring resource group: $resourceGroup" -Level Info
+    $rgUri = "$rgPath`?api-version=2021-04-01"
+    $existingRg = Invoke-ArmGet -Uri $rgUri -Token $armToken
+    if (-not $existingRg) {
+        $rgBody = @{ location = $location } | ConvertTo-Json -Compress
+        Invoke-ArmPut -Uri $rgUri -Body $rgBody -Token $armToken | Out-Null
+        Write-LabLog -Message "Created resource group: $resourceGroup" -Level Success
+    }
+    else {
+        Write-LabLog -Message "Resource group already exists: $resourceGroup" -Level Info
+    }
+
+    # ── 2. Foundry Account (CognitiveServices AIServices) ───────────────────
+    Write-LabLog -Message "Ensuring Foundry account: $accountName" -Level Info
+    $accountUri      = "$accountPath`?api-version=$($script:ArmApiVersion)"
+    $existingAccount = Invoke-ArmGet -Uri $accountUri -Token $armToken
+    $accountId       = $null
+    $accountPrincipalId = $null
+
+    if ($existingAccount) {
+        Write-LabLog -Message "Foundry account already exists: $accountName" -Level Info
+        $accountId = [string]$existingAccount.id
+        if ($existingAccount.PSObject.Properties['identity'] -and $existingAccount.identity.PSObject.Properties['principalId']) {
+            $accountPrincipalId = [string]$existingAccount.identity.principalId
+        }
+    }
+    else {
+        $accountBody = @{
+            kind       = 'AIServices'
+            location   = $location
+            sku        = @{ name = 'S0' }
+            identity   = @{ type = 'SystemAssigned' }
+            properties = @{
+                allowProjectManagement = $true
+                publicNetworkAccess    = 'Enabled'
+                customSubDomainName    = $accountName
+            }
+        } | ConvertTo-Json -Depth 5 -Compress
+
+        $createdAccount = Invoke-ArmPut -Uri $accountUri -Body $accountBody -Token $armToken -Async
+        if ($createdAccount -and $createdAccount.PSObject.Properties['id']) {
+            $accountId = [string]$createdAccount.id
+        }
+        # Re-fetch to pick up managed identity principalId populated after async completion
+        $refreshed = Invoke-ArmGet -Uri $accountUri -Token $armToken
+        if ($refreshed -and $refreshed.PSObject.Properties['identity'] -and $refreshed.identity.PSObject.Properties['principalId']) {
+            $accountPrincipalId = [string]$refreshed.identity.principalId
+        }
+        Write-LabLog -Message "Created Foundry account: $accountName" -Level Success
+    }
+
+    # ── 3. Model Deployments ────────────────────────────────────────────────
+    Write-LabLog -Message "Ensuring model deployment: $modelDeploy (gpt-4o)" -Level Info
+    $modelUri      = "$modelPath`?api-version=$($script:ArmApiVersion)"
+    $existingModel = Invoke-ArmGet -Uri $modelUri -Token $armToken
+    if ($existingModel) {
+        Write-LabLog -Message "Model deployment already exists: $modelDeploy" -Level Info
+    }
+    else {
+        $modelBody = @{
+            sku        = @{ name = 'GlobalStandard'; capacity = 10 }
+            properties = @{
+                model = @{
+                    format  = 'OpenAI'
+                    name    = 'gpt-4o'
+                    version = '2024-11-20'
+                }
+            }
+        } | ConvertTo-Json -Depth 5 -Compress
+        Invoke-ArmPut -Uri $modelUri -Body $modelBody -Token $armToken -Async | Out-Null
+        Write-LabLog -Message "Created model deployment: $modelDeploy" -Level Success
+    }
+
+    $embeddingsModel = if ($fw.PSObject.Properties['embeddingsModel']) { [string]$fw.embeddingsModel } else { 'text-embedding-3-small' }
+    $embeddingsUri   = "$accountPath/deployments/$embeddingsModel`?api-version=$($script:ArmApiVersion)"
+    $existingEmbed   = Invoke-ArmGet -Uri $embeddingsUri -Token $armToken
+    if (-not $existingEmbed) {
+        $embedBody = @{
+            sku        = @{ name = 'GlobalStandard'; capacity = 10 }
+            properties = @{
+                model = @{
+                    format  = 'OpenAI'
+                    name    = $embeddingsModel
+                    version = '1'
+                }
+            }
+        } | ConvertTo-Json -Depth 5 -Compress
+        Invoke-ArmPut -Uri $embeddingsUri -Body $embedBody -Token $armToken -Async | Out-Null
+        Write-LabLog -Message "Created embeddings deployment: $embeddingsModel" -Level Success
+    }
+
+    # ── 4. Foundry Project ──────────────────────────────────────────────────
+    Write-LabLog -Message "Ensuring Foundry project: $projectName" -Level Info
+    $projectUri      = "$projectPath`?api-version=$($script:ArmApiVersion)"
     $existingProject = Invoke-ArmGet -Uri $projectUri -Token $armToken
+    $projectId       = $null
 
-    # If project is in Failed state, delete and recreate
+    # Treat Failed project as non-existent — delete and recreate
     if ($existingProject -and
         $existingProject.PSObject.Properties['properties'] -and
         $existingProject.properties.PSObject.Properties['provisioningState'] -and
         [string]$existingProject.properties.provisioningState -eq 'Failed') {
         Write-LabLog -Message "Project '$projectName' is in Failed state — deleting and recreating." -Level Warning
-        Invoke-ArmDelete -Uri $projectUri -Token $armToken -Async
-        Start-Sleep -Seconds 15
+        Invoke-ArmDelete -Uri $projectUri -Token $armToken | Out-Null
         $existingProject = $null
     }
 
     if ($existingProject -and [string]$existingProject.properties.provisioningState -eq 'Succeeded') {
-        Write-LabLog -Message "Project already exists: $projectName" -Level Info
+        Write-LabLog -Message "Foundry project already exists: $projectName" -Level Info
         $projectId = [string]$existingProject.id
     }
     else {
-        # Create with retry (transient 500s from the RP)
         $projectBody = @{
             location   = $location
             properties = @{ description = 'AI Agent Security — deployed by ai-agent-security' }
         } | ConvertTo-Json -Depth 5 -Compress
 
-        $maxRetries = 6
-        for ($attempt = 1; $attempt -le $maxRetries; $attempt++) {
-            try {
-                $createdProject = Invoke-ArmPut -Uri $projectUri -Body $projectBody -Token $armToken -Async
-                $projectId = if ($createdProject -and $createdProject.PSObject.Properties['id']) {
-                    [string]$createdProject.id
-                } else { $null }
-                Write-LabLog -Message "Created Foundry project: $projectName" -Level Success
-                break
+        $createdProject = Invoke-ArmPut -Uri $projectUri -Body $projectBody -Token $armToken -Async
+        $projectId = if ($createdProject -and $createdProject.PSObject.Properties['id']) {
+            [string]$createdProject.id
+        } else { $projectPath }
+        Write-LabLog -Message "Created Foundry project: $projectName" -Level Success
+    }
+
+    # ── 5. Eval infrastructure (AI Search, App Insights, Log Analytics) ─────
+    $aiSearchEndpoint = $null
+    $evalBicep = Join-Path $PSScriptRoot '..' 'infra' 'foundry-eval-infra.bicep'
+    if (Test-Path $evalBicep) {
+        Write-LabLog -Message 'Deploying eval infrastructure (AI Search, App Insights)' -Level Info
+        $evalOutput = az deployment group create `
+            --resource-group $resourceGroup `
+            --template-file $evalBicep `
+            --parameters location=$location `
+            --subscription $subscriptionId `
+            --output json 2>&1
+
+        if ($LASTEXITCODE -eq 0) {
+            $evalJson = ($evalOutput | Where-Object { $_ -is [string] -and $_ -notmatch '^(WARNING|ERROR):' }) -join "`n"
+            $evalResult = $evalJson | ConvertFrom-Json
+            if ($evalResult.properties.outputs -and $evalResult.properties.outputs.PSObject.Properties['aiSearchEndpoint']) {
+                $aiSearchEndpoint = [string]$evalResult.properties.outputs.aiSearchEndpoint.value
             }
-            catch {
-                if ($attempt -lt $maxRetries) {
-                    Write-LabLog -Message "Project creation attempt $attempt/$maxRetries failed: $($_.Exception.Message). Retrying in 30s..." -Level Warning
-                    Start-Sleep -Seconds 30
-                    $armToken = Get-FoundryArmToken  # Refresh token
-                }
-                else {
-                    throw "Project creation failed after $maxRetries attempts: $($_.Exception.Message)"
-                }
-            }
+            Write-LabLog -Message 'Eval infrastructure deployed' -Level Success
+        }
+        else {
+            Write-LabLog -Message "Eval infra deployment failed (non-fatal): $evalOutput" -Level Warning
         }
     }
 
     $result = [PSCustomObject]@{
-        accountId          = [string]$outputs.accountId.value
+        accountId          = $accountId
         projectId          = $projectId
-        projectEndpoint    = [string]$outputs.projectEndpoint.value
-        accountName        = [string]$outputs.accountName.value
-        accountPrincipalId = [string]$outputs.accountPrincipalId.value
-        aiSearchEndpoint   = if ($outputs.PSObject.Properties['aiSearchEndpoint']) { [string]$outputs.aiSearchEndpoint.value } else { $null }
+        projectEndpoint    = $projectEndpoint
+        accountName        = $accountName
+        accountPrincipalId = $accountPrincipalId
+        aiSearchEndpoint   = $aiSearchEndpoint
     }
 
     Write-LabLog -Message "Foundry infrastructure complete: account=$accountName, project=$projectName" -Level Success

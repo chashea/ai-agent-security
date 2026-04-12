@@ -4,9 +4,9 @@
 // Bing grounding uses the Foundry project's built-in web search capability instead.
 
 param location string
-param aiSearchName string
-param appInsightsName string
-param logAnalyticsName string
+param aiSearchName string = 'aisec-search'
+param appInsightsName string = 'aisec-appinsights'
+param logAnalyticsName string = 'aisec-logs'
 
 // ── Azure AI Search ─────────────────────────────────────────────────────────
 
