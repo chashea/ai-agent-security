@@ -662,7 +662,12 @@ function New-BotFunctionZip {
 
 @app.route(route="$($b.routeName)/messages", methods=["POST"])
 def ${funcName}(req: func.HttpRequest) -> func.HttpResponse:
-    return _handle_bot(req, os.environ.get("${envPrefix}_AGENT_URL", ""))
+    return _handle_bot(
+        req,
+        os.environ.get("${envPrefix}_AGENT_URL", ""),
+        os.environ.get("${envPrefix}_PURVIEW_APP_ID", ""),
+        os.environ.get("${envPrefix}_PURVIEW_APP_NAME", ""),
+    )
 "@
     }
     $routesBlock = $routeFuncs -join ''
@@ -675,8 +680,76 @@ import logging
 import asyncio
 import aiohttp
 from azure.identity.aio import ManagedIdentityCredential
+from azure.identity import DefaultAzureCredential
+
+from purview_sdk import (
+    ProcessActivity,
+    ProcessContentResult,
+    PurviewClient,
+    PurviewSdkError,
+)
 
 app = func.FunctionApp(http_auth_level=func.AuthLevel.ANONYMOUS)
+
+PURVIEW_ENABLED = os.environ.get("PURVIEW_ENABLED", "false").lower() == "true"
+PURVIEW_FAIL_MODE = os.environ.get("PURVIEW_FAIL_MODE", "open").lower()
+PURVIEW_ENFORCE_PROMPT = os.environ.get("PURVIEW_ENFORCE_PROMPT", "true").lower() == "true"
+PURVIEW_ENFORCE_RESPONSE = os.environ.get("PURVIEW_ENFORCE_RESPONSE", "true").lower() == "true"
+
+BLOCKED_PROMPT_REPLY = (
+    "This message was blocked by your organization's data security policy. "
+    "Please rephrase your request without sensitive information."
+)
+BLOCKED_RESPONSE_REPLY = (
+    "The agent's response was blocked by your organization's data security "
+    "policy. Please contact your administrator if you believe this is in error."
+)
+
+
+def _get_user_id(body: dict) -> str:
+    frm = body.get("from", {}) or {}
+    return frm.get("aadObjectId") or frm.get("id") or ""
+
+
+def _purview_client() -> PurviewClient:
+    # Function App MSI app-context token. Per
+    # docs/foundry-purview-integration.md §3 this path populates Audit + DSPM
+    # Activity Explorer with classifications but does NOT trigger DLP/IRM/CC
+    # enforcement — that requires a user-context token (v0.7 SSO follow-on).
+    return PurviewClient(credential=DefaultAzureCredential())
+
+
+def _process(
+    client: PurviewClient,
+    user_id: str,
+    text: str,
+    activity: ProcessActivity,
+    app_id: str,
+    app_name: str,
+    correlation_id: str,
+):
+    try:
+        return client.process_content(
+            user_id=user_id,
+            text=text,
+            activity=activity,
+            app_entra_id=app_id,
+            app_name=app_name,
+            correlation_id=correlation_id,
+        )
+    except PurviewSdkError as exc:
+        logging.warning(
+            "Purview processContent %s failed (%s): %s",
+            activity.value, exc.status, exc.body[:200],
+        )
+    except Exception as exc:
+        logging.warning(
+            "Purview processContent %s unexpected error: %s",
+            activity.value, exc,
+        )
+    if PURVIEW_FAIL_MODE == "closed":
+        raise RuntimeError("Purview processContent failed and failMode=closed")
+    return None
 
 
 async def _call_foundry(agent_url: str, user_message: str) -> str:
@@ -702,20 +775,86 @@ async def _call_foundry(agent_url: str, user_message: str) -> str:
     return json.dumps(data)
 
 
-def _handle_bot(req: func.HttpRequest, agent_url: str) -> func.HttpResponse:
+def _reply(text: str, reply_to_id: str) -> func.HttpResponse:
+    return func.HttpResponse(
+        json.dumps({"type": "message", "text": text, "replyToId": reply_to_id}),
+        mimetype="application/json",
+        status_code=200,
+    )
+
+
+def _handle_bot(
+    req: func.HttpRequest,
+    agent_url: str,
+    purview_app_id: str,
+    purview_app_name: str,
+) -> func.HttpResponse:
     try:
         body = req.get_json()
-        if body.get("type") == "message" and agent_url:
-            reply_text = asyncio.run(_call_foundry(agent_url, body.get("text", "")))
-            reply = {
-                "type": "message",
-                "text": reply_text,
-                "replyToId": body.get("id", ""),
-            }
-            return func.HttpResponse(
-                json.dumps(reply), mimetype="application/json", status_code=200
-            )
+    except Exception as exc:
+        logging.error("Bot error parsing request: %s", exc)
+        return func.HttpResponse(status_code=500)
+
+    if body.get("type") != "message" or not agent_url:
         return func.HttpResponse(status_code=200)
+
+    activity_id = body.get("id", "")
+    user_text = body.get("text", "") or ""
+    user_id = _get_user_id(body)
+
+    purview_active = (
+        PURVIEW_ENABLED
+        and bool(purview_app_id)
+        and bool(user_id)
+        and bool(user_text.strip())
+    )
+    client: PurviewClient = None  # type: ignore[assignment]
+    correlation_id = ""
+    if purview_active:
+        client = _purview_client()
+        correlation_id = f"{purview_app_name}:{activity_id}"
+
+    try:
+        if purview_active:
+            prompt_result: ProcessContentResult = _process(
+                client, user_id, user_text, ProcessActivity.UPLOAD_TEXT,
+                purview_app_id, purview_app_name, correlation_id,
+            )
+            if (
+                PURVIEW_ENFORCE_PROMPT
+                and prompt_result is not None
+                and prompt_result.blocked
+            ):
+                logging.info(
+                    "Prompt blocked by Purview policy: actions=%s user=%s app=%s",
+                    prompt_result.policy_actions, user_id, purview_app_name,
+                )
+                return _reply(BLOCKED_PROMPT_REPLY, activity_id)
+
+        try:
+            reply_text = asyncio.run(_call_foundry(agent_url, user_text))
+        except Exception as exc:
+            logging.error("Foundry call failed: %s", exc)
+            return func.HttpResponse(status_code=500)
+
+        if purview_active and reply_text:
+            response_result: ProcessContentResult = _process(
+                client, user_id, reply_text, ProcessActivity.DOWNLOAD_TEXT,
+                purview_app_id, purview_app_name, correlation_id,
+            )
+            if (
+                PURVIEW_ENFORCE_RESPONSE
+                and response_result is not None
+                and response_result.blocked
+            ):
+                logging.info(
+                    "Response blocked by Purview policy: actions=%s user=%s app=%s",
+                    response_result.policy_actions, user_id, purview_app_name,
+                )
+                return _reply(BLOCKED_RESPONSE_REPLY, activity_id)
+
+        return _reply(reply_text, activity_id)
+
     except Exception as exc:
         logging.error("Bot error: %s", exc)
         return func.HttpResponse(status_code=500)
@@ -723,26 +862,97 @@ $routesBlock
 "@
 
     $hostJson = '{"version":"2.0","extensionBundle":{"id":"Microsoft.Azure.Functions.ExtensionBundle","version":"[4.*, 5.0.0)"}}'
-    $reqsTxt  = "azure-functions`r`nazure-identity`r`naiohttp`r`n"
+    $reqsTxt  = "azure-functions`r`nazure-identity`r`naiohttp`r`nrequests`r`n"
 
     if (-not $PSCmdlet.ShouldProcess('bot function zip', 'New')) { return [byte[]]@() }
 
+    $purviewSdkPath = Join-Path $PSScriptRoot '..' 'scripts' 'purview_sdk.py'
+    if (-not (Test-Path $purviewSdkPath)) {
+        throw "Missing scripts/purview_sdk.py — expected at '$purviewSdkPath'. Bot zip requires the Purview Graph client library."
+    }
+    $purviewSdkCode = Get-Content -Path $purviewSdkPath -Raw
+
     $ms = [System.IO.MemoryStream]::new()
     $za = [System.IO.Compression.ZipArchive]::new($ms, [System.IO.Compression.ZipArchiveMode]::Create, $true)
+    $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
     foreach ($pair in @(
-        @{ Name = 'host.json';        Content = $hostJson }
-        @{ Name = 'requirements.txt'; Content = $reqsTxt  }
-        @{ Name = 'function_app.py';  Content = $pyCode   }
+        @{ Name = 'host.json';        Content = $hostJson       }
+        @{ Name = 'requirements.txt'; Content = $reqsTxt        }
+        @{ Name = 'function_app.py';  Content = $pyCode         }
+        @{ Name = 'purview_sdk.py';   Content = $purviewSdkCode }
     )) {
         $entry  = $za.CreateEntry($pair.Name)
         $stream = $entry.Open()
-        $writer = [System.IO.StreamWriter]::new($stream, [System.Text.Encoding]::UTF8)
+        $writer = [System.IO.StreamWriter]::new($stream, $utf8NoBom)
         $writer.Write($pair.Content)
         $writer.Flush(); $writer.Close(); $stream.Close()
     }
     $za.Dispose()
     $ms.Seek(0, [System.IO.SeekOrigin]::Begin) | Out-Null
     return $ms.ToArray()
+}
+
+# ─── Graph App Role Assignment (for Purview processContent bridge) ─────────
+
+function Grant-BotFunctionGraphPermissions {
+    [CmdletBinding(SupportsShouldProcess)]
+    [OutputType([bool])]
+    param(
+        [Parameter(Mandatory)] [string]$MsiPrincipalId,
+        [Parameter(Mandatory)] [string]$GraphToken
+    )
+
+    # Required Microsoft Graph application permissions for the bot Function
+    # App's managed identity to call /dataSecurityAndGovernance/processContent
+    # and /protectionScopes/compute. These require tenant admin consent; on
+    # MCAPS-governed tenants this call will usually 403 — callers should
+    # handle that by granting the roles manually (see the warning message).
+    $requiredRoles = @('ProtectedContent.Create.All', 'ProtectionScopes.Compute.All')
+    $graphAppId    = '00000003-0000-0000-c000-000000000000'
+
+    if (-not $PSCmdlet.ShouldProcess($MsiPrincipalId, 'Grant Microsoft Graph app permissions')) { return $true }
+
+    $spUri = "https://graph.microsoft.com/v1.0/servicePrincipals(appId='$graphAppId')"
+    $spResp = Invoke-WebRequest -Uri $spUri -Method Get `
+        -Headers @{ Authorization = "Bearer $GraphToken" } `
+        -SkipHttpErrorCheck -ErrorAction Stop
+    if ([int]$spResp.StatusCode -ge 400) {
+        Write-LabLog -Message "Unable to read Microsoft Graph service principal (HTTP $($spResp.StatusCode)). Skipping Purview permission grant." -Level Warning
+        return $false
+    }
+    $graphSp = $spResp.Content | ConvertFrom-Json
+    $graphSpId = [string]$graphSp.id
+
+    $granted = $true
+    foreach ($roleName in $requiredRoles) {
+        $role = $graphSp.appRoles | Where-Object { $_.value -eq $roleName } | Select-Object -First 1
+        if (-not $role) {
+            Write-LabLog -Message "Graph SP does not expose role '$roleName' — may be a newer preview role. Skipping." -Level Warning
+            $granted = $false
+            continue
+        }
+        $assignBody = @{
+            principalId = $MsiPrincipalId
+            resourceId  = $graphSpId
+            appRoleId   = [string]$role.id
+        } | ConvertTo-Json -Compress
+        $assignResp = Invoke-WebRequest `
+            -Uri "https://graph.microsoft.com/v1.0/servicePrincipals/$MsiPrincipalId/appRoleAssignments" `
+            -Method Post `
+            -Headers @{ Authorization = "Bearer $GraphToken"; 'Content-Type' = 'application/json' } `
+            -Body $assignBody -SkipHttpErrorCheck -ErrorAction Stop
+        $status = [int]$assignResp.StatusCode
+        if ($status -eq 201 -or $status -eq 200) {
+            Write-LabLog -Message "Granted '$roleName' to bot Function App MSI." -Level Success
+        } elseif ($status -eq 409 -or ($assignResp.Content -match 'already exists|Permission being assigned already exists')) {
+            Write-LabLog -Message "'$roleName' already assigned to bot Function App MSI." -Level Info
+        } else {
+            Write-LabLog -Message "Failed to grant '$roleName' (HTTP $status): $($assignResp.Content)" -Level Warning
+            Write-LabLog -Message "Manual grant: az rest --method POST --uri 'https://graph.microsoft.com/v1.0/servicePrincipals/$MsiPrincipalId/appRoleAssignments' --body '$assignBody'" -Level Warning
+            $granted = $false
+        }
+    }
+    return $granted
 }
 
 # ─── Deploy Bot Services ────────────────────────────────────────────────────
@@ -913,14 +1123,43 @@ function Deploy-BotServices {
     # Update function app settings
     $settingsDict = @{ FUNCTIONS_WORKER_RUNTIME = 'python'; FUNCTIONS_EXTENSION_VERSION = '~4'; 'AzureWebJobsStorage__accountName' = $storageAccountName }
     if ($blobSasUrl) { $settingsDict['WEBSITE_RUN_FROM_PACKAGE'] = $blobSasUrl }
+
+    $purviewPc = $null
+    if ($Config.workloads.foundry.PSObject.Properties['purviewProcessContent']) {
+        $purviewPc = $Config.workloads.foundry.purviewProcessContent
+    }
+    $purviewEnabled = [bool]($purviewPc -and $purviewPc.enabled)
+    $purviewFailMode = 'open'
+    if ($purviewPc -and $purviewPc.failMode) { $purviewFailMode = [string]$purviewPc.failMode }
+    $purviewEnforcePrompt = $true
+    if ($purviewPc -and $purviewPc.PSObject.Properties['enforceOnPrompt']) {
+        $purviewEnforcePrompt = [bool]$purviewPc.enforceOnPrompt
+    }
+    $purviewEnforceResponse = $true
+    if ($purviewPc -and $purviewPc.PSObject.Properties['enforceOnResponse']) {
+        $purviewEnforceResponse = [bool]$purviewPc.enforceOnResponse
+    }
+    $settingsDict['PURVIEW_ENABLED']          = $purviewEnabled.ToString().ToLower()
+    $settingsDict['PURVIEW_FAIL_MODE']        = $purviewFailMode
+    $settingsDict['PURVIEW_ENFORCE_PROMPT']   = $purviewEnforcePrompt.ToString().ToLower()
+    $settingsDict['PURVIEW_ENFORCE_RESPONSE'] = $purviewEnforceResponse.ToString().ToLower()
+
     foreach ($botInfo in $botInfoList) {
         $ep = switch ($botInfo.routeName) {
             'hr-helpdesk' { 'HR' }; 'finance-analyst' { 'FINANCE' }
             'it-support' { 'IT' };  'sales-research' { 'SALES' }
             default { ($botInfo.routeName -replace '-', '_').ToUpper() }
         }
-        $settingsDict["${ep}_APP_ID"]    = $botInfo.appClientId
-        $settingsDict["${ep}_AGENT_URL"] = $botInfo.agentBaseUrl
+        $settingsDict["${ep}_APP_ID"]             = $botInfo.appClientId
+        $settingsDict["${ep}_AGENT_URL"]          = $botInfo.agentBaseUrl
+        $settingsDict["${ep}_PURVIEW_APP_ID"]     = $botInfo.appObjectId
+        $settingsDict["${ep}_PURVIEW_APP_NAME"]   = $botInfo.botName
+    }
+
+    if ($purviewEnabled) {
+        Write-LabLog -Message "Purview processContent bridge ENABLED (failMode=$($settingsDict['PURVIEW_FAIL_MODE'])). Each bot turn will call Graph /dataSecurityAndGovernance/processContent — app-context audit-only per docs/foundry-purview-integration.md §3." -Level Info
+    } else {
+        Write-LabLog -Message "Purview processContent bridge disabled (workloads.foundry.purviewProcessContent.enabled=false)." -Level Info
     }
     $settingsUri  = "$rgPath/providers/Microsoft.Web/sites/$funcAppName/config/appsettings?api-version=2023-01-01"
     $settingsBody = @{ properties = $settingsDict } | ConvertTo-Json -Depth 5 -Compress
@@ -933,6 +1172,17 @@ function Deploy-BotServices {
             -Method Post -Headers @{ Authorization = "Bearer $ArmToken" } -SkipHttpErrorCheck -ErrorAction Stop | Out-Null
         Write-LabLog -Message "Function App restarted." -Level Success
     } catch { Write-LabLog -Message "Function App restart skipped: $($_.Exception.Message)" -Level Info }
+
+    # Grant Graph permissions for Purview processContent bridge (best-effort;
+    # requires tenant admin on the caller — on MCAPS this will usually need
+    # to be granted manually by an administrator)
+    if ($purviewEnabled -and $msiPrincipalId) {
+        try {
+            Grant-BotFunctionGraphPermissions -MsiPrincipalId $msiPrincipalId -GraphToken $graphToken | Out-Null
+        } catch {
+            Write-LabLog -Message "Graph permission grant threw: $($_.Exception.Message). Grant ProtectedContent.Create.All and ProtectionScopes.Compute.All to Function App MSI $msiPrincipalId manually." -Level Warning
+        }
+    }
 
     # Deploy Bot Services + Teams channels via Bicep
     $botPerAgentBicep = Join-Path $PSScriptRoot '..' 'infra' 'bot-per-agent.bicep'
@@ -1250,6 +1500,7 @@ Export-ModuleMember -Function @(
     'Initialize-PngWriter'
     'New-FoundryAgentPackage'
     'New-BotFunctionZip'
+    'Grant-BotFunctionGraphPermissions'
     'Deploy-BotServices'
     'Remove-BotServices'
     'Publish-TeamsApps'

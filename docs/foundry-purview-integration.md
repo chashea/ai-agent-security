@@ -45,9 +45,9 @@ Per [secure-ai-with-purview](https://learn.microsoft.com/purview/developer/secur
 
 - **Native integration (recommended for governance outcomes):** a single subscription-level toggle (§1). Developers do nothing. Provides audit, classification, DSPM visibility, retention, eDiscovery, and Communication Compliance for all Foundry apps in that subscription.
 - **Agent Framework middleware:** plug Purview policy middleware into the Microsoft Agent Framework pipeline to intercept prompts and responses and enforce DLP. See [Use Microsoft Purview SDK with Agent Framework](https://learn.microsoft.com/agent-framework/tutorials/plugins/use-purview-with-agent-framework-sdk).
-- **Purview Graph APIs (Purview SDK):** `POST /users/{id}/dataSecurityAndGovernance/protectionScopes/compute` and `POST /users/{id}/dataSecurityAndGovernance/processContent`. Reference sample: [serverless-chat-langchainjs-purview](https://github.com/Azure-Samples/serverless-chat-langchainjs-purview).
+- **Purview Graph APIs (Purview SDK):** `POST /users/{id}/dataSecurityAndGovernance/protectionScopes/compute` and `POST /users/{id}/dataSecurityAndGovernance/processContent`. Reference sample: [serverless-chat-langchainjs-purview](https://github.com/Azure-Samples/serverless-chat-langchainjs-purview). This repo ships a Python wrapper for both endpoints at [`scripts/purview_sdk.py`](../scripts/purview_sdk.py) — `PurviewClient.compute_protection_scopes()` and `PurviewClient.process_content()`, plus a CLI for smoke-testing against a real tenant.
 
-The `foundry_agents.py` path in this project currently creates agents via `azure-ai-projects`; to unlock DLP/IRM/CC enforcement a future iteration must either migrate to the Agent Framework middleware model or add direct calls to the Purview Graph APIs (see §3).
+The bot Function App deployed by `Deploy-BotServices` (see `modules/FoundryInfra.psm1`) bundles `purview_sdk.py` into its runtime zip and — when `workloads.foundry.purviewProcessContent.enabled` is true — calls `processContent(uploadText)` before each Foundry call and `processContent(downloadText)` after, threading both with a shared `correlationId` so Activity Explorer pairs them. The Function App's system-assigned managed identity must hold the Graph application permissions `ProtectedContent.Create.All` and `ProtectionScopes.Compute.All`; `Grant-BotFunctionGraphPermissions` attempts the grant at deploy time and falls back to printing a manual `az rest` command when the caller lacks tenant-admin consent. Per §3, the MSI token is **app-context**, so this path populates Audit + DSPM Activity Explorer with classifications but does **not** trigger DLP/IRM/CC enforcement — real blocking requires forwarding the Teams user's Entra token through Bot Framework SSO, tracked as a v0.7 follow-on.
 
 ## 3. Critical auth constraint — user security context
 
@@ -60,7 +60,7 @@ If a Foundry agent calls its Azure OpenAI deployment with its own **managed iden
 1. Forward the caller's Entra user token (the agent runtime must obtain and propagate it), or
 2. Explicitly include `userSecurityContext` on the Azure OpenAI request — see the [OpenAI reference-preview `userSecurityContext` field](https://learn.microsoft.com/azure/ai-foundry/openai/reference-preview#usersecuritycontext).
 
-This project tracks the intent under `workloads.foundry.userSecurityContext.enabled`. Wiring actual propagation into `scripts/foundry_agents.py` is out of scope for the current reference doc; the flag exists so that reviewers know the repo is aware of the constraint.
+This project tracks the intent under `workloads.foundry.userSecurityContext.enabled`. Wiring actual propagation into the request path is a runtime concern, not a deploy-time concern — `scripts/foundry_agents.py` only creates agents and never sees a prompt. The reference library for runtime callers to use is [`scripts/purview_sdk.py`](../scripts/purview_sdk.py): it accepts an explicit bearer token (so a runtime can forward the caller's Entra user token verbatim) and falls back to `DefaultAzureCredential` otherwise. If a caller passes an app-context token the calls will still succeed but will only populate Audit + DSPM Activity Explorer — DLP/IRM/CC will not enforce.
 
 ## 4. Capability matrix for Microsoft Foundry
 
@@ -105,7 +105,7 @@ In practice:
 
 1. Register the Foundry agent (or its fronting web app) in Microsoft Entra.
 2. Author DLP rules with [`New-DlpComplianceRule` example 4](https://learn.microsoft.com/powershell/module/exchange/new-dlpcompliancerule#example-4), scoping each rule to the app's object ID.
-3. Have the agent call `computeProtectionScopes` and `processContent` on every prompt (see the [langchainjs-purview sample](https://github.com/Azure-Samples/serverless-chat-langchainjs-purview)).
+3. Have the agent call `computeProtectionScopes` and `processContent` on every prompt (see the [langchainjs-purview sample](https://github.com/Azure-Samples/serverless-chat-langchainjs-purview)). Use [`scripts/purview_sdk.py`](../scripts/purview_sdk.py) from Python runtimes — `PurviewClient.process_content(activity=ProcessActivity.UPLOAD_TEXT, ...)` before forwarding to the model; `ProcessActivity.DOWNLOAD_TEXT` on the response. `blocked=True` on the returned `ProcessContentResult` indicates a `restrictAccess` policy action and should short-circuit the model call.
 
 Only **SIT-based block** rules are supported today. Label-based DLP for Foundry is not GA — do not author label-condition rules against the Foundry app scope and expect enforcement.
 

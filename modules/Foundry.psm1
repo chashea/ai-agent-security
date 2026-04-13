@@ -172,6 +172,35 @@ function Deploy-Foundry {
     $projectEndpoint = [string]$bicepResult.projectEndpoint
     $prefix          = [string]$Config.prefix
 
+    # Wait for the data-plane endpoint to warm up. Freshly-created Foundry accounts
+    # return SSL EOF / handshake failures on `services.ai.azure.com` for ~60-120s
+    # after the control-plane PUT succeeds. Poll with az rest until we get any
+    # non-SSL response, up to 4 minutes.
+    Write-LabStep -StepName 'Foundry Warmup' -Description 'Waiting for Foundry data-plane endpoint to warm up'
+    $warmupUri = "$projectEndpoint/agents?api-version=$($script:AgentApiVersion)"
+    $warmupDeadline = (Get-Date).AddSeconds(240)
+    $warmupReady = $false
+    $warmupAttempt = 0
+    while ((Get-Date) -lt $warmupDeadline -and -not $warmupReady) {
+        $warmupAttempt++
+        try {
+            $null = az rest --method get --uri $warmupUri --resource 'https://ai.azure.com' 2>&1
+            if ($LASTEXITCODE -eq 0) {
+                $warmupReady = $true
+                Write-LabLog -Message "Foundry data-plane endpoint is warm (attempt $warmupAttempt)." -Level Success
+                break
+            }
+        }
+        catch {
+            $null = $_
+        }
+        Write-LabLog -Message "Foundry data-plane endpoint not ready (attempt $warmupAttempt) — waiting 15s..." -Level Info
+        Start-Sleep -Seconds 15
+    }
+    if (-not $warmupReady) {
+        Write-LabLog -Message 'Foundry data-plane endpoint did not warm up within 4 minutes. Proceeding anyway — Python script may still succeed or retry.' -Level Warning
+    }
+
     # Common Python input base
     $pythonBase = [ordered]@{
         projectEndpoint = $projectEndpoint
@@ -361,6 +390,19 @@ function Deploy-Foundry {
     $publishedApps = Publish-TeamsApps -Config $Config -Agents $manifest.agents
     if ($publishedApps -and @($publishedApps).Count -gt 0) {
         $manifest | Add-Member -NotePropertyName 'teamsApps' -NotePropertyValue $publishedApps -Force
+    }
+
+    # ── Step 6.5: Agent 365 digital worker publishing (opt-in) ───────────────
+    $a365Cfg = if ($fw.PSObject.Properties['agent365']) { $fw.agent365 } else { $null }
+    if ($a365Cfg -and $a365Cfg.PSObject.Properties['enabled'] -and [bool]$a365Cfg.enabled) {
+        Write-LabStep -StepName 'Agent 365' -Description 'Publishing Foundry agents as Agent 365 digital workers'
+        try {
+            $a365Results = Publish-FoundryAgentsAsDigitalWorkers -Config $Config -FoundryManifest $manifest
+            if ($a365Results -and @($a365Results).Count -gt 0) {
+                $manifest | Add-Member -NotePropertyName 'agent365' -NotePropertyValue $a365Results -Force
+            }
+        }
+        catch { Write-LabLog -Message "Agent 365 publish error: $($_.Exception.Message)" -Level Warning }
     }
 
     # ── Step 7: Post-deploy evaluations ──────────────────────────────────────

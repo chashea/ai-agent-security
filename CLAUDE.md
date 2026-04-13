@@ -139,15 +139,14 @@ Constraints section.
 2. AgentIdentity — managed identity RBAC (auto-derived from tools)
 3. TestUsers — groups needed for policy scoping
 4. SensitivityLabels (+ AI Search label-enforcement roles on the index MI)
-5. CollectionPolicies — DSPM-for-AI one-click collection policies (prerequisite for steps 6–10)
+5. CollectionPolicies — DSPM-for-AI one-click collection policies (prerequisite for steps 6–9)
 6. DLP — Foundry rules scoped to an Entra-registered AI app (SIT-based block only)
 7. Retention — Enterprise AI apps location
-8. EDiscovery — `ItemClass:IPM.SkypeTeams.Message.ConnectedAIApp.AzureAI.<accountName>`
-9. CommunicationCompliance
-10. InsiderRisk — Risky AI usage template
-11. ConditionalAccess — MFA + risky sign-in block (report-only). **Adjacent identity control, not Purview-for-Foundry.**
-12. MDCA — session monitoring + activity alerts + app governance. **Adjacent SaaS control, not Purview-for-Foundry.**
-13. AuditConfig
+8. CommunicationCompliance
+9. InsiderRisk — Risky AI usage template
+10. ConditionalAccess — MFA + risky sign-in block (report-only). **Adjacent identity control, not Purview-for-Foundry.**
+11. MDCA — session monitoring + activity alerts + app governance. **Adjacent SaaS control, not Purview-for-Foundry.**
+12. AuditConfig
 
 Removal is the exact reverse.
 

@@ -53,6 +53,19 @@ function Deploy-CollectionPolicies {
             continue
         }
 
+        # The DSPM for AI "Detect sensitive info shared with AI via network" one-click
+        # policy REQUIRES a SASE / SSE partner integration (Zscaler, Netskope, etc.) to be
+        # configured under Purview DLP settings before it can be created. Without a
+        # partner integration, Set-FeatureConfiguration fails with
+        # InvalidCompliancePolicyLocationAppException. Skip it cleanly and surface a
+        # manual-action message. See docs/foundry-purview-integration.md §5.1 +
+        # https://learn.microsoft.com/purview/collection-policies-create-deploy-policy#sase-provider-integration
+        if ($policyName -match 'via\s*network|sensitive\s*info\s*shared\s*with\s*AI\s*via\s*network') {
+            Write-LabLog -Message "Collection policy '$policyName' requires a SASE/SSE partner integration that this repo cannot automate. Add a SASE/SSE integration in the Purview portal (Data loss prevention -> Endpoint DLP settings -> SASE provider integration), then enable this policy from DSPM for AI -> Recommendations -> 'Extend insights into sensitive data in AI app interactions'." -Level Warning
+            $manualRequired.Add($policyName)
+            continue
+        }
+
         $existing = $null
         try {
             $existing = Get-FeatureConfiguration -Identity $policyName -ErrorAction SilentlyContinue

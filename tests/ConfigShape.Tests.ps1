@@ -31,6 +31,14 @@ Describe 'Foundry subscription-level prerequisites' {
     It 'Declares foundry.userSecurityContext.enabled = true' {
         $script:Config.workloads.foundry.userSecurityContext.enabled | Should -BeTrue
     }
+
+    It 'Declares a foundry.purviewProcessContent block' {
+        $script:Config.workloads.foundry.PSObject.Properties['purviewProcessContent'] | Should -Not -BeNullOrEmpty
+    }
+
+    It 'Declares a valid failMode for purviewProcessContent' {
+        $script:Config.workloads.foundry.purviewProcessContent.failMode | Should -BeIn @('open', 'closed')
+    }
 }
 
 Describe 'Collection policies prerequisite workload' {
@@ -84,18 +92,9 @@ Describe 'Retention location (EnterpriseAI)' {
     }
 }
 
-Describe 'eDiscovery case query (ItemClass)' {
-    It 'Uses the Foundry ItemClass in the hold and search queries' {
-        $case = $script:Config.workloads.eDiscovery.cases[0]
-        $case.holdQuery   | Should -Match 'IPM\.SkypeTeams\.Message\.ConnectedAIApp\.AzureAI'
-        $case.searchQuery | Should -Match 'IPM\.SkypeTeams\.Message\.ConnectedAIApp\.AzureAI'
-    }
-
-    It 'References the configured Foundry account name in the ItemClass suffix' {
-        $accountName = [string]$script:Config.workloads.foundry.accountName
-        $accountName | Should -Not -BeNullOrEmpty
-        $case = $script:Config.workloads.eDiscovery.cases[0]
-        $case.searchQuery | Should -Match ([regex]::Escape($accountName))
+Describe 'eDiscovery workload removed' {
+    It 'Does not declare the eDiscovery workload (removed from lab surface)' {
+        $script:Config.workloads.PSObject.Properties['eDiscovery'] | Should -BeNullOrEmpty
     }
 }
 

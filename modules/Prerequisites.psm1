@@ -163,14 +163,22 @@ function Connect-LabServices {
         $existingContext = $null
         try { $existingContext = Get-MgContext -ErrorAction SilentlyContinue } catch { $existingContext = $null }
 
+        $existingScopes = @()
+        if ($existingContext -and $existingContext.Scopes) { $existingScopes = @($existingContext.Scopes) }
+        $missingScopes = @($graphScopes | Where-Object { $existingScopes -notcontains $_ })
+
         $graphActive = $existingContext -and
                        -not [string]::IsNullOrWhiteSpace($existingContext.Account) -and
-                       [string]$existingContext.TenantId -eq $TenantId
+                       [string]$existingContext.TenantId -eq $TenantId -and
+                       $missingScopes.Count -eq 0
 
         if ($graphActive) {
             Write-Verbose "Reusing existing Microsoft Graph context: $($existingContext.Account)"
         }
         else {
+            if ($existingContext -and $missingScopes.Count -gt 0) {
+                Write-Verbose "Existing Graph context missing scopes ($($missingScopes -join ', ')) — reconnecting."
+            }
             Write-Verbose "Connecting to Microsoft Graph (tenant: $TenantId)..."
             Connect-MgGraph -TenantId $TenantId -Scopes $graphScopes -NoWelcome -ErrorAction Stop
         }
@@ -572,7 +580,6 @@ function Test-LabConfigValidity {
         'sensitivityLabels'         = @('labels')
         'testUsers'                 = @('users')
         'retention'                 = @('policies')
-        'eDiscovery'                = @('cases')
         'communicationCompliance'   = @('policies')
         'insiderRisk'               = @('policies')
         'conditionalAccess'         = @('policies')

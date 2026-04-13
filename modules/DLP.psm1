@@ -439,7 +439,73 @@ function Deploy-DLP {
 
     foreach ($policy in $Config.workloads.dlp.policies) {
         $policyName = "$($Config.prefix)-$($policy.name)"
-        $createLocationParams = Get-LabDlpLocationParameters -Locations ([string[]]@($policy.locations)) -CommandInfo $newPolicyCommand -PolicyName $policyName
+
+        # Entra-registered AI app scope (Foundry agents).
+        # See docs/foundry-purview-integration.md §5.2 and MS Learn
+        # New-DlpComplianceRule example 4. The cmdlet shape is:
+        #   New-DlpCompliancePolicy -Mode Enable -Locations <json> -EnforcementPlanes @('Entra')
+        # where <json> is a Locations payload with Workload=Applications and
+        # the app's client ID.
+        $isEntraAiAppScope = ($policy.PSObject.Properties.Name -contains 'scope') -and
+                             ([string]$policy.scope -eq 'entraRegisteredAiApp')
+
+        if ($isEntraAiAppScope) {
+            $targetedAppId = if ($policy.PSObject.Properties.Name -contains 'targetedEntraAppId' -and
+                                 -not [string]::IsNullOrWhiteSpace([string]$policy.targetedEntraAppId)) {
+                [string]$policy.targetedEntraAppId
+            } else { $null }
+
+            $targetedDisplayName = if ($policy.PSObject.Properties.Name -contains 'targetedEntraAppDisplayName' -and
+                                        -not [string]::IsNullOrWhiteSpace([string]$policy.targetedEntraAppDisplayName)) {
+                [string]$policy.targetedEntraAppDisplayName
+            } else { $null }
+
+            if (-not $targetedAppId -and $targetedDisplayName) {
+                $escaped = $targetedDisplayName.Replace("'", "''")
+                $app = Get-MgApplication -Filter "displayName eq '$escaped'" -ErrorAction SilentlyContinue | Select-Object -First 1
+                if ($app) {
+                    $targetedAppId = [string]$app.AppId
+                    Write-LabLog -Message "Resolved Entra AI app '$targetedDisplayName' -> $targetedAppId for policy '$policyName'." -Level Info
+                }
+                else {
+                    Write-LabLog -Message "Entra AI app '$targetedDisplayName' not found in Graph. Skipping policy '$policyName' until the Foundry bot app registration exists." -Level Warning
+                    continue
+                }
+            }
+
+            if (-not $targetedAppId) {
+                Write-LabLog -Message "Policy '$policyName' uses entraRegisteredAiApp scope but no targetedEntraAppId or targetedEntraAppDisplayName is set. Skipping." -Level Warning
+                continue
+            }
+
+            if (-not $newPolicyCommand.Parameters.ContainsKey('Locations') -or -not $newPolicyCommand.Parameters.ContainsKey('EnforcementPlanes')) {
+                Write-LabLog -Message "New-DlpCompliancePolicy in this environment does not expose -Locations / -EnforcementPlanes. The Entra-registered AI app scope requires these parameters. Skipping policy '$policyName'." -Level Warning
+                continue
+            }
+
+            $locDisplay = if ($targetedDisplayName) { $targetedDisplayName } else { $targetedAppId }
+            $locationsPayload = @(
+                [ordered]@{
+                    Workload            = 'Applications'
+                    Location            = $targetedAppId
+                    LocationDisplayName = $locDisplay
+                    LocationSource      = 'Entra'
+                    LocationType        = 'Individual'
+                    Inclusions          = @(
+                        [ordered]@{ Type = 'Tenant'; Identity = 'All' }
+                    )
+                }
+            ) | ConvertTo-Json -Compress -Depth 5
+
+            $createLocationParams = @{
+                Locations         = $locationsPayload
+                EnforcementPlanes = @('Entra')
+            }
+        }
+        else {
+            $createLocationParams = Get-LabDlpLocationParameters -Locations ([string[]]@($policy.locations)) -CommandInfo $newPolicyCommand -PolicyName $policyName
+        }
+
         $createScopeParams = Get-LabPolicyScopeParameters -Policy $policy -CommandInfo $newPolicyCommand -PolicyName $policyName
         if (($policy.PSObject.Properties.Name -contains 'policyMode') -and -not [string]::IsNullOrWhiteSpace([string]$policy.policyMode)) {
             Write-LabLog -Message "DLP policy mode for '$policyName': $($policy.policyMode)" -Level Info
@@ -459,7 +525,11 @@ function Deploy-DLP {
 
         if ($existing) {
             Write-LabLog -Message "DLP policy already exists: $policyName" -Level Info
-            if ($setPolicyCommand) {
+            # Don't try to re-apply Locations JSON on an existing Entra-scoped policy — the
+            # cmdlet path for updating Entra app scope is not idempotent. Skip the Set- path
+            # for those; rule creation below still goes through its own idempotency check.
+            $attemptPolicyUpdate = -not $isEntraAiAppScope
+            if ($attemptPolicyUpdate -and $setPolicyCommand) {
                 $setLocationParams = Get-LabDlpLocationParameters -Locations ([string[]]@($policy.locations)) -CommandInfo $setPolicyCommand -PolicyName $policyName -PreferAddParameters
                 $setScopeParams = Get-LabPolicyScopeParameters -Policy $policy -CommandInfo $setPolicyCommand -PolicyName $policyName
                 $setParams = @{ Identity = $policyName; ErrorAction = 'Stop' }
@@ -730,10 +800,11 @@ function Remove-DLP {
                         continue
                     }
 
-                    if ($retryCount -lt $maxRetries -and $_.Exception.Message -match 'server side error|try again after some time') {
+                    if ($retryCount -lt $maxRetries -and $_.Exception.Message -match 'server side error|try again after some time|PolicyLockConflict|being deployed') {
                         $retryCount++
-                        Write-LabLog -Message "Transient error removing DLP rule '$ruleName', retry $retryCount of $maxRetries in 10s..." -Level Warning
-                        Start-Sleep -Seconds 10
+                        $waitSeconds = if ($_.Exception.Message -match 'PolicyLockConflict|being deployed') { 60 } else { 10 }
+                        Write-LabLog -Message "Transient error removing DLP rule '$ruleName', retry $retryCount of $maxRetries in ${waitSeconds}s..." -Level Warning
+                        Start-Sleep -Seconds $waitSeconds
                     }
                     else {
                         Write-LabLog -Message "Failed to remove DLP rule '$ruleName' after retries: $($_.Exception.Message)" -Level Warning
@@ -775,10 +846,11 @@ function Remove-DLP {
                         continue
                     }
 
-                    if ($retryCount -lt $maxRetries -and $_.Exception.Message -match 'server side error|try again after some time') {
+                    if ($retryCount -lt $maxRetries -and $_.Exception.Message -match 'server side error|try again after some time|PolicyLockConflict|being deployed') {
                         $retryCount++
-                        Write-LabLog -Message "Transient error removing DLP policy '$policyName', retry $retryCount of $maxRetries in 10s..." -Level Warning
-                        Start-Sleep -Seconds 10
+                        $waitSeconds = if ($_.Exception.Message -match 'PolicyLockConflict|being deployed') { 60 } else { 10 }
+                        Write-LabLog -Message "Transient error removing DLP policy '$policyName', retry $retryCount of $maxRetries in ${waitSeconds}s..." -Level Warning
+                        Start-Sleep -Seconds $waitSeconds
                     }
                     else {
                         Write-LabLog -Message "Failed to remove DLP policy '$policyName' after retries: $($_.Exception.Message)" -Level Warning

@@ -132,6 +132,22 @@ try {
         return $null
     }
 
+    $script:failedWorkloads = [System.Collections.Generic.List[string]]::new()
+
+    function Invoke-RemoveWorkload {
+        param(
+            [Parameter(Mandatory)][string]$Name,
+            [Parameter(Mandatory)][scriptblock]$ScriptBlock
+        )
+        try {
+            & $ScriptBlock
+        }
+        catch {
+            Write-LabLog -Message "${Name} removal FAILED: $($_.Exception.Message)" -Level Error
+            $script:failedWorkloads.Add($Name) | Out-Null
+        }
+    }
+
     # Determine whether Foundry is active in config
     $foundryConfigEnabled = $Config.workloads.PSObject.Properties['foundry'] -and $Config.workloads.foundry.enabled
     $removeFoundry = $foundryConfigEnabled -and -not $SkipFoundry
@@ -186,26 +202,34 @@ try {
 
         if ($Config.workloads.PSObject.Properties['auditConfig'] -and $Config.workloads.auditConfig.enabled) {
             Write-LabStep -StepName 'AuditConfig' -Description 'Audit configuration removal'
-            Remove-AuditConfig -Config $Config -Manifest (Get-WorkloadManifest -WorkloadName 'auditConfig') -WhatIf:$WhatIfPreference
-            Write-LabLog -Message 'AuditConfig removal complete.' -Level Success
+            Invoke-RemoveWorkload -Name 'AuditConfig' -ScriptBlock {
+                Remove-AuditConfig -Config $Config -Manifest (Get-WorkloadManifest -WorkloadName 'auditConfig') -WhatIf:$WhatIfPreference
+                Write-LabLog -Message 'AuditConfig removal complete.' -Level Success
+            }
         }
 
         if ($Config.workloads.PSObject.Properties['mdca'] -and $Config.workloads.mdca.enabled) {
             Write-LabStep -StepName 'MDCA' -Description 'Removing Defender for Cloud Apps policies'
-            Remove-MDCA -Config $Config -Manifest (Get-WorkloadManifest -WorkloadName 'mdca') -WhatIf:$WhatIfPreference
-            Write-LabLog -Message 'MDCA removal complete.' -Level Success
+            Invoke-RemoveWorkload -Name 'MDCA' -ScriptBlock {
+                Remove-MDCA -Config $Config -Manifest (Get-WorkloadManifest -WorkloadName 'mdca') -WhatIf:$WhatIfPreference
+                Write-LabLog -Message 'MDCA removal complete.' -Level Success
+            }
         }
 
         if ($Config.workloads.PSObject.Properties['conditionalAccess'] -and $Config.workloads.conditionalAccess.enabled) {
             Write-LabStep -StepName 'ConditionalAccess' -Description 'Removing Conditional Access policies'
-            Remove-ConditionalAccess -Config $Config -Manifest (Get-WorkloadManifest -WorkloadName 'conditionalAccess') -WhatIf:$WhatIfPreference
-            Write-LabLog -Message 'Conditional Access removal complete.' -Level Success
+            Invoke-RemoveWorkload -Name 'ConditionalAccess' -ScriptBlock {
+                Remove-ConditionalAccess -Config $Config -Manifest (Get-WorkloadManifest -WorkloadName 'conditionalAccess') -WhatIf:$WhatIfPreference
+                Write-LabLog -Message 'Conditional Access removal complete.' -Level Success
+            }
         }
 
         if ($Config.workloads.PSObject.Properties['insiderRisk'] -and $Config.workloads.insiderRisk.enabled) {
             Write-LabStep -StepName 'InsiderRisk' -Description 'Removing insider risk management policies'
-            Remove-InsiderRisk -Config $Config -Manifest (Get-WorkloadManifest -WorkloadName 'insiderRisk') -WhatIf:$WhatIfPreference
-            Write-LabLog -Message 'Insider Risk removal complete.' -Level Success
+            Invoke-RemoveWorkload -Name 'InsiderRisk' -ScriptBlock {
+                Remove-InsiderRisk -Config $Config -Manifest (Get-WorkloadManifest -WorkloadName 'insiderRisk') -WhatIf:$WhatIfPreference
+                Write-LabLog -Message 'Insider Risk removal complete.' -Level Success
+            }
         }
         else {
             Write-LabLog -Message 'insiderRisk workload is disabled, skipping.' -Level Info
@@ -213,26 +237,21 @@ try {
 
         if ($Config.workloads.PSObject.Properties['communicationCompliance'] -and $Config.workloads.communicationCompliance.enabled) {
             Write-LabStep -StepName 'CommunicationCompliance' -Description 'Removing communication compliance policies'
-            Remove-CommunicationCompliance -Config $Config -Manifest (Get-WorkloadManifest -WorkloadName 'communicationCompliance') -WhatIf:$WhatIfPreference
-            Write-LabLog -Message 'Communication Compliance removal complete.' -Level Success
+            Invoke-RemoveWorkload -Name 'CommunicationCompliance' -ScriptBlock {
+                Remove-CommunicationCompliance -Config $Config -Manifest (Get-WorkloadManifest -WorkloadName 'communicationCompliance') -WhatIf:$WhatIfPreference
+                Write-LabLog -Message 'Communication Compliance removal complete.' -Level Success
+            }
         }
         else {
             Write-LabLog -Message 'communicationCompliance workload is disabled, skipping.' -Level Info
         }
 
-        if ($Config.workloads.PSObject.Properties['eDiscovery'] -and $Config.workloads.eDiscovery.enabled) {
-            Write-LabStep -StepName 'EDiscovery' -Description 'Removing eDiscovery cases'
-            Remove-EDiscovery -Config $Config -Manifest (Get-WorkloadManifest -WorkloadName 'eDiscovery') -WhatIf:$WhatIfPreference
-            Write-LabLog -Message 'eDiscovery removal complete.' -Level Success
-        }
-        else {
-            Write-LabLog -Message 'eDiscovery workload is disabled, skipping.' -Level Info
-        }
-
         if ($Config.workloads.PSObject.Properties['retention'] -and $Config.workloads.retention.enabled) {
             Write-LabStep -StepName 'Retention' -Description 'Removing retention policies and labels'
-            Remove-Retention -Config $Config -Manifest (Get-WorkloadManifest -WorkloadName 'retention') -WhatIf:$WhatIfPreference
-            Write-LabLog -Message 'Retention removal complete.' -Level Success
+            Invoke-RemoveWorkload -Name 'Retention' -ScriptBlock {
+                Remove-Retention -Config $Config -Manifest (Get-WorkloadManifest -WorkloadName 'retention') -WhatIf:$WhatIfPreference
+                Write-LabLog -Message 'Retention removal complete.' -Level Success
+            }
         }
         else {
             Write-LabLog -Message 'retention workload is disabled, skipping.' -Level Info
@@ -240,8 +259,10 @@ try {
 
         if ($Config.workloads.PSObject.Properties['dlp'] -and $Config.workloads.dlp.enabled) {
             Write-LabStep -StepName 'DLP' -Description 'Removing DLP policies'
-            Remove-DLP -Config $Config -Manifest (Get-WorkloadManifest -WorkloadName 'dlp') -WhatIf:$WhatIfPreference
-            Write-LabLog -Message 'DLP removal complete.' -Level Success
+            Invoke-RemoveWorkload -Name 'DLP' -ScriptBlock {
+                Remove-DLP -Config $Config -Manifest (Get-WorkloadManifest -WorkloadName 'dlp') -WhatIf:$WhatIfPreference
+                Write-LabLog -Message 'DLP removal complete.' -Level Success
+            }
         }
         else {
             Write-LabLog -Message 'dlp workload is disabled, skipping.' -Level Info
@@ -249,8 +270,10 @@ try {
 
         if ($Config.workloads.PSObject.Properties['collectionPolicies'] -and $Config.workloads.collectionPolicies.enabled) {
             Write-LabStep -StepName 'CollectionPolicies' -Description 'Removing DSPM-for-AI collection policies'
-            Remove-CollectionPolicies -Config $Config -Manifest (Get-WorkloadManifest -WorkloadName 'collectionPolicies') -WhatIf:$WhatIfPreference
-            Write-LabLog -Message 'Collection policies removal complete.' -Level Success
+            Invoke-RemoveWorkload -Name 'CollectionPolicies' -ScriptBlock {
+                Remove-CollectionPolicies -Config $Config -Manifest (Get-WorkloadManifest -WorkloadName 'collectionPolicies') -WhatIf:$WhatIfPreference
+                Write-LabLog -Message 'Collection policies removal complete.' -Level Success
+            }
         }
         else {
             Write-LabLog -Message 'collectionPolicies workload is disabled, skipping.' -Level Info
@@ -258,8 +281,10 @@ try {
 
         if ($Config.workloads.PSObject.Properties['sensitivityLabels'] -and $Config.workloads.sensitivityLabels.enabled) {
             Write-LabStep -StepName 'SensitivityLabels' -Description 'Removing sensitivity labels'
-            Remove-SensitivityLabels -Config $Config -Manifest (Get-WorkloadManifest -WorkloadName 'sensitivityLabels') -WhatIf:$WhatIfPreference
-            Write-LabLog -Message 'Sensitivity Labels removal complete.' -Level Success
+            Invoke-RemoveWorkload -Name 'SensitivityLabels' -ScriptBlock {
+                Remove-SensitivityLabels -Config $Config -Manifest (Get-WorkloadManifest -WorkloadName 'sensitivityLabels') -WhatIf:$WhatIfPreference
+                Write-LabLog -Message 'Sensitivity Labels removal complete.' -Level Success
+            }
         }
         else {
             Write-LabLog -Message 'sensitivityLabels workload is disabled, skipping.' -Level Info
@@ -267,8 +292,10 @@ try {
 
         if ($Config.workloads.PSObject.Properties['testUsers'] -and $Config.workloads.testUsers.enabled) {
             Write-LabStep -StepName 'TestUsers' -Description 'Removing test users'
-            Remove-TestUsers -Config $Config -Manifest (Get-WorkloadManifest -WorkloadName 'testUsers') -WhatIf:$WhatIfPreference
-            Write-LabLog -Message 'Test Users removal complete.' -Level Success
+            Invoke-RemoveWorkload -Name 'TestUsers' -ScriptBlock {
+                Remove-TestUsers -Config $Config -Manifest (Get-WorkloadManifest -WorkloadName 'testUsers') -WhatIf:$WhatIfPreference
+                Write-LabLog -Message 'Test Users removal complete.' -Level Success
+            }
         }
         else {
             Write-LabLog -Message 'testUsers workload is disabled, skipping.' -Level Info
@@ -283,12 +310,16 @@ try {
     if (-not $SkipFoundry) {
         if ($foundryConfigEnabled) {
             Write-LabStep -StepName 'AgentIdentity' -Description 'Removing agent managed identity and RBAC'
-            Remove-AgentIdentity -Config $Config -Manifest (Get-WorkloadManifest -WorkloadName 'agentIdentity') -WhatIf:$WhatIfPreference
-            Write-LabLog -Message 'AgentIdentity removal complete.' -Level Success
+            Invoke-RemoveWorkload -Name 'AgentIdentity' -ScriptBlock {
+                Remove-AgentIdentity -Config $Config -Manifest (Get-WorkloadManifest -WorkloadName 'agentIdentity') -WhatIf:$WhatIfPreference
+                Write-LabLog -Message 'AgentIdentity removal complete.' -Level Success
+            }
 
             Write-LabStep -StepName 'Foundry' -Description 'Removing Azure AI Foundry agents, project, and account'
-            Remove-Foundry -Config $Config -Manifest (Get-WorkloadManifest -WorkloadName 'foundry') -WhatIf:$WhatIfPreference
-            Write-LabLog -Message 'Foundry removal complete.' -Level Success
+            Invoke-RemoveWorkload -Name 'Foundry' -ScriptBlock {
+                Remove-Foundry -Config $Config -Manifest (Get-WorkloadManifest -WorkloadName 'foundry') -WhatIf:$WhatIfPreference
+                Write-LabLog -Message 'Foundry removal complete.' -Level Success
+            }
         }
         else {
             Write-LabLog -Message 'foundry workload is disabled in config, skipping.' -Level Info
@@ -300,7 +331,11 @@ try {
 
     # Summary
     Write-LabStep -StepName 'Summary' -Description 'Teardown complete'
-    Write-LabLog -Message 'Remove finished successfully.' -Level Success
+    if ($script:failedWorkloads.Count -gt 0) {
+        Write-LabLog -Message "Remove finished with $($script:failedWorkloads.Count) failed workload(s): $($script:failedWorkloads -join ', ')" -Level Warning
+    } else {
+        Write-LabLog -Message 'Remove finished successfully.' -Level Success
+    }
 }
 catch {
     Write-LabLog -Message "Remove failed: $_" -Level Error

@@ -22,6 +22,13 @@
         "enabled": true,
         "notes": "Purview Data Security Policies only enforce against Foundry calls that use an Entra user-context token or explicit userSecurityContext. See docs/foundry-purview-integration.md §3. Propagation through scripts/foundry_agents.py is out of scope for this repo; this flag records the intent."
       },
+      "purviewProcessContent": {
+        "enabled": false,
+        "failMode": "open",
+        "enforceOnPrompt": true,
+        "enforceOnResponse": true,
+        "notes": "Opt-in runtime bridge from the bot Function App to Microsoft Graph /dataSecurityAndGovernance/{processContent,protectionScopes/compute}. When enabled, each bot turn sends prompt (uploadText) and response (downloadText) into Purview — prompts/responses flow into Audit + DSPM Activity Explorer with classifications. Enforcement (DLP block) requires a user-context token (v0.7 follow-on via Bot Framework SSO); today's app-context MSI path is audit-only per docs/foundry-purview-integration.md §3. failMode=open means Graph errors fall through to the model; enforceOnPrompt/Response toggle short-circuiting when policy actions include restrictAccess."
+      },
       "connections": {
         "aiSearch": {
           "indexName": "aisec-compliance-index"
@@ -191,7 +198,6 @@
           "tools": [
             { "type": "code_interpreter" },
             { "type": "file_search" },
-            { "type": "azure_ai_search", "indexName": "aisec-compliance-index" },
             { "type": "bing_grounding" },
             { "type": "image_generation" },
             { "type": "a2a" }
@@ -199,6 +205,14 @@
         }
       ],
       "botService": { "enabled": true },
+      "agent365": {
+        "enabled": false,
+        "appVersion": "1.0.0",
+        "shortDescription": "AI Agent Security Lab digital worker",
+        "fullDescription": "Foundry agent published to Microsoft Agent 365 as a digital worker. Requires Frontier preview enrollment and tenant admin approval in the Microsoft 365 admin center.",
+        "developerName": "AI Agent Security Lab",
+        "developerWebsiteUrl": "https://github.com/chashea/ai-agent-security"
+      },
       "defenderPosture": true
     },
     "agentIdentity": {
@@ -465,21 +479,6 @@
           "retentionDays": 365,
           "retentionAction": "retainAndDelete",
           "locations": ["EnterpriseAI"]
-        }
-      ]
-    },
-    "eDiscovery": {
-      "enabled": true,
-      "notes": "Search Foundry prompts/responses by ItemClass = IPM.SkypeTeams.Message.ConnectedAIApp.AzureAI.<FoundryAccountName>. See docs/foundry-purview-integration.md §5.4.",
-      "cases": [
-        {
-          "name": "AI-Governance-Investigation",
-          "description": "Forensic investigation into AI agent interactions and potential data misuse",
-          "custodians": [
-            "charlesshea@MngEnvMCAP648165.onmicrosoft.com"
-          ],
-          "holdQuery": "ItemClass:IPM.SkypeTeams.Message.ConnectedAIApp.AzureAI.aisec-foundry",
-          "searchQuery": "ItemClass:IPM.SkypeTeams.Message.ConnectedAIApp.AzureAI.aisec-foundry"
         }
       ]
     },

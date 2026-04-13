@@ -31,9 +31,17 @@ function Deploy-TestUsers {
         $missingUsers = [System.Collections.Generic.List[string]]::new()
 
         foreach ($user in $Config.workloads.testUsers.users) {
-            $upn = $user.upn
+            # Accept either 'upn' or 'identity' — config.json uses 'identity' for
+            # existing-mode validation, whereas create-mode uses mailNickname + domain.
+            $upn = $null
+            if ($user.PSObject.Properties['upn'] -and -not [string]::IsNullOrWhiteSpace([string]$user.upn)) {
+                $upn = [string]$user.upn
+            }
+            elseif ($user.PSObject.Properties['identity'] -and -not [string]::IsNullOrWhiteSpace([string]$user.identity)) {
+                $upn = [string]$user.identity
+            }
             if ([string]::IsNullOrWhiteSpace($upn)) {
-                throw "Each user entry must have a 'upn' property when testUsers.mode is 'existing'."
+                throw "Each user entry must have an 'upn' or 'identity' property when testUsers.mode is 'existing'."
             }
 
             $existing = Get-LabUserByIdentity -Identity $upn -DefaultDomain $Config.domain
@@ -232,15 +240,27 @@ function Remove-TestUsers {
     # Remove groups first (reverse dependency order)
     foreach ($groupName in $targetGroups) {
 
-        $existing = Get-MgGroup -Filter "displayName eq '$groupName'" -ErrorAction Stop
+        try {
+            $existing = Get-MgGroup -Filter "displayName eq '$groupName'" -ErrorAction Stop
+        }
+        catch {
+            Write-LabLog -Message "Failed to query group '$groupName': $($_.Exception.Message)" -Level Warning
+            continue
+        }
+
         if (-not $existing) {
             Write-LabLog -Message "Group not found, skipping: $groupName" -Level Warning
             continue
         }
 
         if ($PSCmdlet.ShouldProcess($groupName, 'Remove group')) {
-            Remove-MgGroup -GroupId $existing.Id -ErrorAction Stop
-            Write-LabLog -Message "Removed group: $groupName" -Level Success
+            try {
+                Remove-MgGroup -GroupId $existing.Id -ErrorAction Stop
+                Write-LabLog -Message "Removed group: $groupName" -Level Success
+            }
+            catch {
+                Write-LabLog -Message "Failed to remove group '$groupName': $($_.Exception.Message)" -Level Warning
+            }
         }
     }
 

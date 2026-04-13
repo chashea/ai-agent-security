@@ -8,6 +8,33 @@
     (item-level, user-applicable) with publish policies.
 #>
 
+function Invoke-RetentionRemovalWithRetry {
+    param(
+        [Parameter(Mandatory)][string]$Label,
+        [Parameter(Mandatory)][scriptblock]$ScriptBlock,
+        [int]$MaxAttempts = 4,
+        [int]$LockWaitSeconds = 60
+    )
+
+    $attempt = 0
+    while ($true) {
+        $attempt++
+        try {
+            & $ScriptBlock
+            return
+        }
+        catch {
+            $msg = $_.Exception.Message
+            if ($attempt -lt $MaxAttempts -and $msg -match 'PolicyLockConflict|being deployed|try again after some time') {
+                Write-LabLog "Policy '$Label' is locked by a pending deployment — waiting ${LockWaitSeconds}s (attempt $attempt/$MaxAttempts)..." -Level Warning
+                Start-Sleep -Seconds $LockWaitSeconds
+                continue
+            }
+            throw
+        }
+    }
+}
+
 function Deploy-Retention {
     [CmdletBinding(SupportsShouldProcess)]
     [OutputType([PSCustomObject])]
@@ -42,12 +69,46 @@ function Deploy-Retention {
                     Name = $policyName
                 }
 
+                # Resolve location names against the installed New-RetentionCompliancePolicy
+                # cmdlet. "EnterpriseAI" / "Enterprise AI apps" is the Purview portal location
+                # for Foundry / Copilot interactions per docs/foundry-purview-integration.md §5.3;
+                # the PowerShell parameter name is still moving between previews, so probe several
+                # candidates before falling back to the -Applications parameter.
+                $newRetentionCmd = Get-Command New-RetentionCompliancePolicy -ErrorAction SilentlyContinue
                 foreach ($location in $policy.locations) {
                     switch ($location) {
-                        'Exchange'   { $policyParams['ExchangeLocation'] = 'All' }
-                        'SharePoint' { $policyParams['SharePointLocation'] = 'All' }
-                        'OneDrive'   { $policyParams['OneDriveLocation'] = 'All' }
+                        'Exchange'     { $policyParams['ExchangeLocation']     = 'All' }
+                        'SharePoint'   { $policyParams['SharePointLocation']   = 'All' }
+                        'OneDrive'     { $policyParams['OneDriveLocation']     = 'All' }
+                        'ModernGroup'  { $policyParams['ModernGroupLocation']  = 'All' }
+                        { $_ -in @('EnterpriseAI','EnterpriseAIApps','Enterprise AI apps') } {
+                            $resolved = $false
+                            foreach ($candidate in @('EnterpriseAILocation', 'EnterpriseAIAppsLocation', 'CopilotLocation', 'M365CopilotLocation')) {
+                                if ($newRetentionCmd -and $newRetentionCmd.Parameters.ContainsKey($candidate)) {
+                                    $policyParams[$candidate] = 'All'
+                                    $resolved = $true
+                                    Write-LabLog "Retention policy '$policyName' using $candidate for EnterpriseAI location." -Level Info
+                                    break
+                                }
+                            }
+                            if (-not $resolved -and $newRetentionCmd -and $newRetentionCmd.Parameters.ContainsKey('Applications')) {
+                                $policyParams['Applications'] = @('Microsoft 365 Copilot,AI')
+                                $resolved = $true
+                                Write-LabLog "Retention policy '$policyName' using -Applications @('Microsoft 365 Copilot,AI') for EnterpriseAI location." -Level Info
+                            }
+                            if (-not $resolved) {
+                                Write-LabLog "Retention policy '$policyName' requests EnterpriseAI location but no supported parameter exists on New-RetentionCompliancePolicy. Create this policy manually via the Purview portal (Data Lifecycle Management -> Retention -> Enterprise AI apps)." -Level Warning
+                            }
+                        }
+                        default {
+                            Write-LabLog "Retention policy '$policyName' has unknown location '$location' — skipping." -Level Warning
+                        }
                     }
+                }
+
+                if ($policyParams.Count -le 1) {
+                    Write-LabLog "Retention policy '$policyName' has no resolved locations. Skipping creation." -Level Warning
+                    continue
                 }
 
                 New-RetentionCompliancePolicy @policyParams | Out-Null
@@ -240,12 +301,18 @@ function Remove-Retention {
         try {
             Get-RetentionCompliancePolicy -Identity $labelInfo.publishPolicyName -ErrorAction Stop | Out-Null
             if ($PSCmdlet.ShouldProcess($labelInfo.publishPolicyName, 'Remove label publish policy')) {
-                Remove-RetentionCompliancePolicy -Identity $labelInfo.publishPolicyName -Confirm:$false -ErrorAction Stop
+                Invoke-RetentionRemovalWithRetry -Label $labelInfo.publishPolicyName -ScriptBlock {
+                    Remove-RetentionCompliancePolicy -Identity $labelInfo.publishPolicyName -Confirm:$false -ErrorAction Stop
+                }
                 Write-LabLog "Removed label publish policy: $($labelInfo.publishPolicyName)" -Level Success
             }
         }
         catch {
-            Write-LabLog "Label publish policy not found or already removed: $($labelInfo.publishPolicyName)" -Level Info
+            if ($_.Exception.Message -match 'not found|ManagementObjectNotFoundException|ObjectNotFoundException') {
+                Write-LabLog "Label publish policy not found or already removed: $($labelInfo.publishPolicyName)" -Level Info
+            } else {
+                Write-LabLog "Failed to remove label publish policy '$($labelInfo.publishPolicyName)': $($_.Exception.Message)" -Level Warning
+            }
         }
 
         # Remove compliance tag
@@ -298,12 +365,18 @@ function Remove-Retention {
         try {
             Get-RetentionCompliancePolicy -Identity $policyName -ErrorAction Stop | Out-Null
             if ($PSCmdlet.ShouldProcess($policyName, 'Remove retention compliance policy')) {
-                Remove-RetentionCompliancePolicy -Identity $policyName -Confirm:$false -ErrorAction Stop
+                Invoke-RetentionRemovalWithRetry -Label $policyName -ScriptBlock {
+                    Remove-RetentionCompliancePolicy -Identity $policyName -Confirm:$false -ErrorAction Stop
+                }
                 Write-LabLog "Removed retention policy: $policyName" -Level Success
             }
         }
         catch {
-            Write-LabLog "Retention policy not found or already removed: $policyName" -Level Info
+            if ($_.Exception.Message -match 'not found|ManagementObjectNotFoundException|ObjectNotFoundException') {
+                Write-LabLog "Retention policy not found or already removed: $policyName" -Level Info
+            } else {
+                Write-LabLog "Failed to remove retention policy '$policyName': $($_.Exception.Message)" -Level Warning
+            }
         }
     }
 }

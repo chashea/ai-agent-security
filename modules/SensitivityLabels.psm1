@@ -265,8 +265,21 @@ function Set-LabLabelPublication {
             }
 
             if ($hasSetUpdates) {
-                Set-LabelPolicy @setParams | Out-Null
-                Write-LabLog "Updated label publication policy: $policyName" -Level Success
+                try {
+                    Set-LabelPolicy @setParams | Out-Null
+                    Write-LabLog "Updated label publication policy: $policyName" -Level Success
+                }
+                catch {
+                    # LabelAlreadyPublishedException is benign — it means the labels are
+                    # already published (by this or another policy) and there's nothing to
+                    # do. Log as Info and continue rather than failing the workload.
+                    if ($_.Exception.Message -match 'LabelAlreadyPublishedException|already published') {
+                        Write-LabLog "Label publication policy '$policyName' — labels already published (idempotent no-op)." -Level Info
+                    }
+                    else {
+                        throw
+                    }
+                }
             }
             else {
                 Write-LabLog "No supported Set-LabelPolicy parameters were available to update labels/locations for: $policyName" -Level Warning
