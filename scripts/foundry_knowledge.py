@@ -27,6 +27,64 @@ logging.basicConfig(
 log = logging.getLogger(__name__)
 
 
+def _retry_request(
+    method: str,
+    url: str,
+    max_attempts: int = 6,
+    base_delay: float = 3.0,
+    **kwargs,
+) -> requests.Response:
+    """requests.{method} with retry on SSL / timeout / 5xx errors.
+
+    Freshly-created Foundry accounts on ``services.ai.azure.com`` can return
+    transient SSL EOF errors and connection timeouts for 2-5 minutes after
+    provisioning. This wrapper retries those transport-class failures with
+    exponential backoff. Non-retriable errors (4xx, auth) raise immediately.
+    """
+    method_func = getattr(requests, method.lower())
+    last_exc: Exception | None = None
+    for attempt in range(1, max_attempts + 1):
+        try:
+            resp = method_func(url, **kwargs)
+            if 500 <= resp.status_code < 600 and attempt < max_attempts:
+                log.warning(
+                    "HTTP %d on %s %s (attempt %d/%d) — retrying",
+                    resp.status_code,
+                    method,
+                    url,
+                    attempt,
+                    max_attempts,
+                )
+                time.sleep(base_delay * attempt)
+                continue
+            return resp
+        except (
+            requests.exceptions.SSLError,
+            requests.exceptions.ConnectionError,
+            requests.exceptions.Timeout,
+            requests.exceptions.ChunkedEncodingError,
+        ) as exc:
+            last_exc = exc
+            if attempt < max_attempts:
+                delay = base_delay * attempt
+                log.warning(
+                    "Transient transport error on %s %s (attempt %d/%d): %s — "
+                    "retrying in %.1fs",
+                    method,
+                    url,
+                    attempt,
+                    max_attempts,
+                    type(exc).__name__,
+                    delay,
+                )
+                time.sleep(delay)
+                continue
+            break
+    if last_exc is not None:
+        raise last_exc
+    raise RuntimeError(f"Exhausted {max_attempts} retries on {method} {url}")
+
+
 def _get_token(credential: DefaultAzureCredential, scope: str) -> str:
     return credential.get_token(scope).token
 
@@ -49,7 +107,7 @@ def upload_file(
     with open(file_path, "rb") as f:
         files = {"file": (filename, f, "application/octet-stream")}
         data = {"purpose": "assistants"}
-        resp = requests.post(url, headers=headers, files=files, data=data)
+        resp = _retry_request("POST", url, headers=headers, files=files, data=data)
 
     if resp.status_code < 400:
         file_id = resp.json().get("id", "")
@@ -73,7 +131,7 @@ def create_vector_store(
     """Create a vector store with the given files. Returns vector store ID or None."""
     url = f"{project_endpoint}/vector_stores?api-version={api_version}"
     body = {"name": name, "file_ids": file_ids}
-    resp = requests.post(url, json=body, headers=_data_headers(data_token))
+    resp = _retry_request("POST", url, json=body, headers=_data_headers(data_token))
 
     if resp.status_code < 400:
         vs = resp.json()
@@ -84,7 +142,7 @@ def create_vector_store(
         status_url = f"{project_endpoint}/vector_stores/{vs_id}?api-version={api_version}"
         for attempt in range(30):
             time.sleep(2)
-            status_resp = requests.get(status_url, headers=_data_headers(data_token))
+            status_resp = _retry_request("GET", status_url, headers=_data_headers(data_token))
             if status_resp.status_code == 200:
                 status = status_resp.json().get("status", "")
                 if status == "completed":
@@ -106,7 +164,7 @@ def delete_vector_store(
 ) -> bool:
     """Delete a vector store by ID."""
     url = f"{project_endpoint}/vector_stores/{vs_id}?api-version={api_version}"
-    resp = requests.delete(url, headers=_data_headers(data_token))
+    resp = _retry_request("DELETE", url, headers=_data_headers(data_token))
     if resp.status_code < 400:
         log.info("Deleted vector store: %s", vs_id)
         return True

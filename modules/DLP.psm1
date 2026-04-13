@@ -450,31 +450,46 @@ function Deploy-DLP {
                              ([string]$policy.scope -eq 'entraRegisteredAiApp')
 
         if ($isEntraAiAppScope) {
-            $targetedAppId = if ($policy.PSObject.Properties.Name -contains 'targetedEntraAppId' -and
-                                 -not [string]::IsNullOrWhiteSpace([string]$policy.targetedEntraAppId)) {
-                [string]$policy.targetedEntraAppId
-            } else { $null }
+            # Collect target app identifiers. Config supports three forms:
+            #   targetedEntraAppId          (single object/app ID — use as-is)
+            #   targetedEntraAppDisplayName (single displayName — Graph lookup)
+            #   targetedEntraAppDisplayNames (array — Graph lookup per entry, all
+            #                                 resolved apps become Locations entries)
+            $resolvedApps = [System.Collections.Generic.List[PSCustomObject]]::new()
 
-            $targetedDisplayName = if ($policy.PSObject.Properties.Name -contains 'targetedEntraAppDisplayName' -and
-                                        -not [string]::IsNullOrWhiteSpace([string]$policy.targetedEntraAppDisplayName)) {
-                [string]$policy.targetedEntraAppDisplayName
-            } else { $null }
+            if ($policy.PSObject.Properties.Name -contains 'targetedEntraAppId' -and
+                -not [string]::IsNullOrWhiteSpace([string]$policy.targetedEntraAppId)) {
+                $resolvedApps.Add([PSCustomObject]@{ appId = [string]$policy.targetedEntraAppId; displayName = 'unknown' })
+            }
 
-            if (-not $targetedAppId -and $targetedDisplayName) {
-                $escaped = $targetedDisplayName.Replace("'", "''")
-                $app = Get-MgApplication -Filter "displayName eq '$escaped'" -ErrorAction SilentlyContinue | Select-Object -First 1
-                if ($app) {
-                    $targetedAppId = [string]$app.AppId
-                    Write-LabLog -Message "Resolved Entra AI app '$targetedDisplayName' -> $targetedAppId for policy '$policyName'." -Level Info
-                }
-                else {
-                    Write-LabLog -Message "Entra AI app '$targetedDisplayName' not found in Graph. Skipping policy '$policyName' until the Foundry bot app registration exists." -Level Warning
-                    continue
+            $displayNamesToLookup = [System.Collections.Generic.List[string]]::new()
+            if ($policy.PSObject.Properties.Name -contains 'targetedEntraAppDisplayName' -and
+                -not [string]::IsNullOrWhiteSpace([string]$policy.targetedEntraAppDisplayName)) {
+                $displayNamesToLookup.Add([string]$policy.targetedEntraAppDisplayName)
+            }
+            if ($policy.PSObject.Properties.Name -contains 'targetedEntraAppDisplayNames' -and
+                $policy.targetedEntraAppDisplayNames) {
+                foreach ($n in @($policy.targetedEntraAppDisplayNames)) {
+                    if (-not [string]::IsNullOrWhiteSpace([string]$n)) {
+                        $displayNamesToLookup.Add([string]$n)
+                    }
                 }
             }
 
-            if (-not $targetedAppId) {
-                Write-LabLog -Message "Policy '$policyName' uses entraRegisteredAiApp scope but no targetedEntraAppId or targetedEntraAppDisplayName is set. Skipping." -Level Warning
+            foreach ($displayName in ($displayNamesToLookup | Sort-Object -Unique)) {
+                $escaped = $displayName.Replace("'", "''")
+                $app = Get-MgApplication -Filter "displayName eq '$escaped'" -ErrorAction SilentlyContinue | Select-Object -First 1
+                if ($app) {
+                    $resolvedApps.Add([PSCustomObject]@{ appId = [string]$app.AppId; displayName = $displayName })
+                    Write-LabLog -Message "Resolved Entra AI app '$displayName' -> $($app.AppId) for policy '$policyName'." -Level Info
+                }
+                else {
+                    Write-LabLog -Message "Entra AI app '$displayName' not found in Graph — omitting from policy '$policyName'." -Level Warning
+                }
+            }
+
+            if ($resolvedApps.Count -eq 0) {
+                Write-LabLog -Message "Policy '$policyName' uses entraRegisteredAiApp scope but no target apps resolved. Skipping policy (will recreate on next deploy if target apps become available)." -Level Warning
                 continue
             }
 
@@ -483,24 +498,29 @@ function Deploy-DLP {
                 continue
             }
 
-            $locDisplay = if ($targetedDisplayName) { $targetedDisplayName } else { $targetedAppId }
-            $locationsPayload = @(
+            $locationsArray = foreach ($ra in $resolvedApps) {
                 [ordered]@{
                     Workload            = 'Applications'
-                    Location            = $targetedAppId
-                    LocationDisplayName = $locDisplay
+                    Location            = $ra.appId
+                    LocationDisplayName = $ra.displayName
                     LocationSource      = 'Entra'
                     LocationType        = 'Individual'
                     Inclusions          = @(
                         [ordered]@{ Type = 'Tenant'; Identity = 'All' }
                     )
                 }
-            ) | ConvertTo-Json -Compress -Depth 5
+            }
+            $locationsPayload = @($locationsArray) | ConvertTo-Json -Compress -Depth 5
+            # ConvertTo-Json wraps a single-element array as an object; force array notation
+            if ($resolvedApps.Count -eq 1 -and -not $locationsPayload.StartsWith('[')) {
+                $locationsPayload = "[$locationsPayload]"
+            }
 
             $createLocationParams = @{
                 Locations         = $locationsPayload
                 EnforcementPlanes = @('Entra')
             }
+            Write-LabLog -Message "DLP policy '$policyName' targeting $($resolvedApps.Count) Entra-registered AI app(s): $(($resolvedApps | ForEach-Object { $_.displayName }) -join ', ')" -Level Info
         }
         else {
             $createLocationParams = Get-LabDlpLocationParameters -Locations ([string[]]@($policy.locations)) -CommandInfo $newPolicyCommand -PolicyName $policyName

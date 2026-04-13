@@ -37,7 +37,7 @@ function Invoke-FoundryPython {
         [Parameter(Mandatory)] [string]$ScriptName,
         [Parameter(Mandatory)] [string]$Action,
         [Parameter(Mandatory)] [hashtable]$InputData,
-        [Parameter()] [int]$JsonDepth = 10
+        [Parameter()] [int]$JsonDepth = 20
     )
 
     $scriptPath = Join-Path $PSScriptRoot '..' 'scripts' $ScriptName
@@ -350,6 +350,74 @@ function Deploy-Foundry {
     # Store vector stores in manifest for cleanup
     if ($vectorStores -and @($vectorStores.PSObject.Properties).Count -gt 0) {
         $manifest | Add-Member -NotePropertyName 'vectorStores' -NotePropertyValue $vectorStores -Force
+    }
+
+    # ── Step 5b: Refresh tool definitions with a2a baseUrls ──────────────────
+    # The first build-tools pass runs before agents exist, so `a2a` is always
+    # skipped (it needs baseUrls). Now that agents have been deployed and
+    # published we have baseUrls — rebuild the tool definitions with the
+    # populated manifest and re-apply them via delete-and-recreate so a2a_preview
+    # actually lands on the agents.
+    #
+    # TEMPORARILY DISABLED (2026-04-13): a2a_preview schema is unstable in the
+    # current preview API and rejects every shape we've tried. Re-enable once
+    # foundry_tools.py build_tool_definitions emits a valid a2a payload.
+    $needsA2aRefresh = $false
+    $haveBaseUrls = @($manifest.agents | Where-Object { $_.baseUrl }).Count -gt 0
+    if ($needsA2aRefresh -and $haveBaseUrls) {
+        Write-LabStep -StepName 'Tool Refresh' -Description 'Re-applying tool definitions with a2a baseUrls'
+
+        $refreshInput = [ordered]@{
+            agents = @($fw.agents | ForEach-Object {
+                $agentObj = [ordered]@{ name = [string]$_.name; tools = @() }
+                if ($_.PSObject.Properties['tools'] -and $_.tools) {
+                    $agentObj['tools'] = @($_.tools)
+                }
+                $agentObj
+            })
+            connectionIds   = $connectionIds
+            vectorStores    = $vectorStores
+            agentsManifest  = @($manifest.agents | ForEach-Object {
+                [ordered]@{
+                    name        = [string]$_.name
+                    baseUrl     = [string]$_.baseUrl
+                    description = ''
+                }
+            })
+            projectEndpoint = $projectEndpoint
+        }
+
+        try {
+            $refreshResult     = Invoke-FoundryPython -ScriptName 'foundry_tools.py' -Action 'build-tools' -InputData $refreshInput
+            $refreshedTools    = if ($refreshResult.PSObject.Properties['toolDefinitions']) { $refreshResult.toolDefinitions } else { @{} }
+
+            $updateInput = [ordered]@{} + $pythonBase
+            $updateInput['agents'] = @($fw.agents | ForEach-Object {
+                [ordered]@{
+                    name         = [string]$_.name
+                    model        = [string]$_.model
+                    instructions = [string]$_.instructions
+                    description  = if ($_.PSObject.Properties['description']) { [string]$_.description } else { $null }
+                }
+            })
+            $updateInput['toolDefinitions'] = $refreshedTools
+            $updateInput['userSecurityContextEnabled'] = [bool](
+                $fw.PSObject.Properties['userSecurityContext'] -and
+                $fw.userSecurityContext -and
+                [bool]$fw.userSecurityContext.enabled
+            )
+
+            $refreshManifest = Invoke-FoundryPython -ScriptName 'foundry_agents.py' -Action 'deploy' -InputData $updateInput
+            # Update baseUrls from refreshed deploy (unchanged for existing apps)
+            foreach ($ra in $refreshManifest.agents) {
+                $match = $manifest.agents | Where-Object { $_.name -eq [string]$ra.name } | Select-Object -First 1
+                if ($match -and $ra.PSObject.Properties['toolCount']) {
+                    $match | Add-Member -NotePropertyName 'toolCount' -NotePropertyValue ([int]$ra.toolCount) -Force
+                }
+            }
+            Write-LabLog -Message 'Tool refresh complete (a2a baseUrls applied).' -Level Success
+        }
+        catch { Write-LabLog -Message "Tool refresh error: $($_.Exception.Message)" -Level Warning }
     }
 
     # ── Step 6: Teams packages + Bot Services + Teams catalog ────────────────

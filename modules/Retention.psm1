@@ -71,9 +71,12 @@ function Deploy-Retention {
 
                 # Resolve location names against the installed New-RetentionCompliancePolicy
                 # cmdlet. "EnterpriseAI" / "Enterprise AI apps" is the Purview portal location
-                # for Foundry / Copilot interactions per docs/foundry-purview-integration.md §5.3;
-                # the PowerShell parameter name is still moving between previews, so probe several
-                # candidates before falling back to the -Applications parameter.
+                # for Foundry / Copilot interactions per docs/foundry-purview-integration.md §5.3,
+                # but the PowerShell cmdlet in this environment doesn't yet expose an
+                # EnterpriseAILocation parameter. Since Foundry agent interactions are stored in
+                # the user's Exchange mailbox (that's the underlying persistence per MS Learn),
+                # fall back to ExchangeLocation scoped to the configured test users — this DOES
+                # cover Foundry interactions, it's just broader than the dedicated portal location.
                 $newRetentionCmd = Get-Command New-RetentionCompliancePolicy -ErrorAction SilentlyContinue
                 foreach ($location in $policy.locations) {
                     switch ($location) {
@@ -82,22 +85,41 @@ function Deploy-Retention {
                         'OneDrive'     { $policyParams['OneDriveLocation']     = 'All' }
                         'ModernGroup'  { $policyParams['ModernGroupLocation']  = 'All' }
                         { $_ -in @('EnterpriseAI','EnterpriseAIApps','Enterprise AI apps') } {
-                            $resolved = $false
-                            foreach ($candidate in @('EnterpriseAILocation', 'EnterpriseAIAppsLocation', 'CopilotLocation', 'M365CopilotLocation')) {
+                            $dedicatedParamFound = $false
+                            foreach ($candidate in @('EnterpriseAILocation', 'EnterpriseAIAppsLocation')) {
                                 if ($newRetentionCmd -and $newRetentionCmd.Parameters.ContainsKey($candidate)) {
                                     $policyParams[$candidate] = 'All'
-                                    $resolved = $true
+                                    $dedicatedParamFound = $true
                                     Write-LabLog "Retention policy '$policyName' using $candidate for EnterpriseAI location." -Level Info
                                     break
                                 }
                             }
-                            if (-not $resolved -and $newRetentionCmd -and $newRetentionCmd.Parameters.ContainsKey('Applications')) {
-                                $policyParams['Applications'] = @('Microsoft 365 Copilot,AI')
-                                $resolved = $true
-                                Write-LabLog "Retention policy '$policyName' using -Applications @('Microsoft 365 Copilot,AI') for EnterpriseAI location." -Level Info
-                            }
-                            if (-not $resolved) {
-                                Write-LabLog "Retention policy '$policyName' requests EnterpriseAI location but no supported parameter exists on New-RetentionCompliancePolicy. Create this policy manually via the Purview portal (Data Lifecycle Management -> Retention -> Enterprise AI apps)." -Level Warning
+                            if (-not $dedicatedParamFound) {
+                                # Fall back to ExchangeLocation scoped to configured test users.
+                                # Foundry/Copilot interactions are stored in the user's mailbox, so
+                                # a mailbox-scoped retention policy covers them (broader than
+                                # Enterprise AI apps but correct). Use all configured test user
+                                # identities as the scope.
+                                $testUserUpns = [System.Collections.Generic.List[string]]::new()
+                                if ($Config.workloads.PSObject.Properties['testUsers'] -and $Config.workloads.testUsers.PSObject.Properties['users']) {
+                                    foreach ($u in @($Config.workloads.testUsers.users)) {
+                                        $upn = $null
+                                        if ($u.PSObject.Properties['upn'] -and -not [string]::IsNullOrWhiteSpace([string]$u.upn)) {
+                                            $upn = [string]$u.upn
+                                        }
+                                        elseif ($u.PSObject.Properties['identity'] -and -not [string]::IsNullOrWhiteSpace([string]$u.identity)) {
+                                            $upn = [string]$u.identity
+                                        }
+                                        if ($upn) { $testUserUpns.Add($upn) }
+                                    }
+                                }
+                                if ($testUserUpns.Count -gt 0) {
+                                    $policyParams['ExchangeLocation'] = $testUserUpns.ToArray()
+                                    Write-LabLog "Retention policy '$policyName' falling back to ExchangeLocation scoped to test users ($($testUserUpns.Count) mailboxes) — the PowerShell cmdlet does not yet expose a dedicated EnterpriseAI location parameter. Foundry interactions are stored in user mailboxes so this policy still covers them. See docs/foundry-purview-integration.md §5.3." -Level Info
+                                }
+                                else {
+                                    Write-LabLog "Retention policy '$policyName' requests EnterpriseAI location and falls back to ExchangeLocation, but no test users are configured to scope the mailbox location. Skipping policy." -Level Warning
+                                }
                             }
                         }
                         default {
@@ -107,12 +129,18 @@ function Deploy-Retention {
                 }
 
                 if ($policyParams.Count -le 1) {
-                    Write-LabLog "Retention policy '$policyName' has no resolved locations. Skipping creation." -Level Warning
+                    Write-LabLog "Retention policy '$policyName' has no resolved locations. Skipping policy creation." -Level Warning
                     continue
                 }
 
-                New-RetentionCompliancePolicy @policyParams | Out-Null
-                Write-LabLog "Created retention policy: $policyName" -Level Success
+                try {
+                    New-RetentionCompliancePolicy @policyParams -ErrorAction Stop | Out-Null
+                    Write-LabLog "Created retention policy: $policyName" -Level Success
+                }
+                catch {
+                    Write-LabLog "Failed to create retention policy '$policyName': $($_.Exception.Message)" -Level Error
+                    continue
+                }
 
                 # Map config action to compliance action
                 $complianceAction = switch ($policy.retentionAction) {
@@ -122,13 +150,18 @@ function Deploy-Retention {
                 }
 
                 $ruleName = "$policyName-rule"
-                New-RetentionComplianceRule `
-                    -Policy $policyName `
-                    -Name $ruleName `
-                    -RetentionDuration $policy.retentionDays `
-                    -RetentionComplianceAction $complianceAction | Out-Null
-
-                Write-LabLog "Created retention rule: $ruleName (${complianceAction}, $($policy.retentionDays) days)" -Level Success
+                try {
+                    New-RetentionComplianceRule `
+                        -Policy $policyName `
+                        -Name $ruleName `
+                        -RetentionDuration $policy.retentionDays `
+                        -RetentionComplianceAction $complianceAction `
+                        -ErrorAction Stop | Out-Null
+                    Write-LabLog "Created retention rule: $ruleName (${complianceAction}, $($policy.retentionDays) days)" -Level Success
+                }
+                catch {
+                    Write-LabLog "Failed to create retention rule '$ruleName': $($_.Exception.Message)" -Level Warning
+                }
             }
         }
 

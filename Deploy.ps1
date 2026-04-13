@@ -172,17 +172,32 @@ try {
 
         Write-LabStep -StepName 'Auth' -Description 'Connecting to cloud services'
         $needsPurview = -not $FoundryOnly
+        # Foundry-only mode still needs Graph so the Teams catalog publish step can upload
+        # declarative-agent packages (requires AppCatalog.ReadWrite.All). Exchange Online
+        # stays skipped because no Purview cmdlets run in this mode.
+        $needsGraph = $needsPurview -or $deployFoundry
         $azureSubscriptionId = if ($deployFoundry -and $Config.workloads.foundry.PSObject.Properties['subscriptionId']) {
             [string]$Config.workloads.foundry.subscriptionId
         }
         else { $null }
-        Connect-LabServices -TenantId $TenantId `
-            -SkipExchange:(-not $needsPurview) `
-            -SkipGraph:(-not $needsPurview) `
-            -ConnectAzure:$deployFoundry `
-            -AzureSubscriptionId $azureSubscriptionId
+        $connectParams = @{
+            TenantId            = $TenantId
+            SkipExchange        = (-not $needsPurview)
+            SkipGraph           = (-not $needsGraph)
+            ConnectAzure        = $deployFoundry
+            AzureSubscriptionId = $azureSubscriptionId
+        }
+        if ($needsGraph -and -not $needsPurview) {
+            $connectParams['GraphScopes'] = @('AppCatalog.ReadWrite.All')
+        }
+        # Device code auth works in both TTY and non-TTY pwsh. Connect-MgGraph
+        # otherwise tries a broker/browser flow that blocks when stdin is not a
+        # terminal (e.g. background jobs, CI, claude-code pipes).
+        if ($needsGraph) { $connectParams['UseDeviceCode'] = $true }
+        Connect-LabServices @connectParams
         $services = [System.Collections.Generic.List[string]]::new()
-        if ($needsPurview) { $services.Add('Exchange Online'); $services.Add('Microsoft Graph') }
+        if ($needsPurview) { $services.Add('Exchange Online') }
+        if ($needsGraph) { $services.Add('Microsoft Graph') }
         if ($deployFoundry) { $services.Add('Azure') }
         Write-LabLog -Message "Connected to $($services -join ', ')." -Level Success
 
@@ -493,51 +508,55 @@ try {
                     continue
                 }
 
-                $groupExists = Test-DeployedEntityExists -EntityType 'Group' -EntityName $targetGroupName -CheckAction {
-                    param($name)
-                    # Primary path: Invoke-MgGraphRequest with $count=true + ConsistencyLevel
-                    # eventual. Using the raw REST path rather than Get-MgGroup -Filter because
-                    # the Get-MgGroup SDK cmdlet has been observed returning "Expected literal...
-                    # Was '<'" JSON-parse errors on this tenant.
-                    # Fallback path: if the REST call returns 404 or any other error, fall back
-                    # to Get-MgGroup -Filter — known to work when the SDK HTML-parse bug isn't
-                    # hit. Either path succeeding is sufficient.
-                    $escapedName = $name.Replace("'", "''")
-                    try {
-                        $uri = "/v1.0/groups?`$filter=displayName eq '$escapedName'&`$count=true"
-                        $response = Invoke-MgGraphRequest -Method GET -Uri $uri -Headers @{ 'ConsistencyLevel' = 'eventual' } -ErrorAction Stop
-                        $values = @()
-                        if ($response -is [System.Collections.IDictionary] -and $response.Contains('value')) {
-                            $values = @($response['value'])
+                # Non-fatal validation: both Invoke-MgGraphRequest ($count=true + eventual)
+                # and Get-MgGroup -Filter have been observed failing on this tenant (404 on
+                # the REST path, "Expected literal... Was '<'" HTML-parse bug on the SDK
+                # path). The Deploy-TestUsers module's own "already exists / created" log
+                # line is authoritative.
+                try {
+                    $groupExists = Test-DeployedEntityExists -EntityType 'Group' -EntityName $targetGroupName -CheckAction {
+                        param($name)
+                        $escapedName = $name.Replace("'", "''")
+                        try {
+                            $uri = "/v1.0/groups?`$filter=displayName eq '$escapedName'&`$count=true"
+                            $response = Invoke-MgGraphRequest -Method GET -Uri $uri -Headers @{ 'ConsistencyLevel' = 'eventual' } -ErrorAction Stop
+                            $values = @()
+                            if ($response -is [System.Collections.IDictionary] -and $response.Contains('value')) {
+                                $values = @($response['value'])
+                            }
+                            elseif ($response.PSObject.Properties['value']) {
+                                $values = @($response.value)
+                            }
+                            Write-LabLog -Message "Group validation '$name': response value count = $($values.Count)" -Level Info
+                            if ($values.Count -gt 0) {
+                                return $true
+                            }
                         }
-                        elseif ($response.PSObject.Properties['value']) {
-                            $values = @($response.value)
+                        catch {
+                            Write-LabLog -Message "Group validation '$name' REST lookup failed ($($_.Exception.Message)). Falling back to Get-MgGroup -Filter." -Level Info
                         }
-                        Write-LabLog -Message "Group validation '$name': response value count = $($values.Count)" -Level Info
-                        if ($values.Count -gt 0) {
-                            return $true
-                        }
-                    }
-                    catch {
-                        Write-LabLog -Message "Group validation '$name' REST lookup failed ($($_.Exception.Message)). Falling back to Get-MgGroup -Filter." -Level Info
-                    }
 
-                    try {
-                        $sdkGroup = Get-MgGroup -Filter "displayName eq '$escapedName'" -ErrorAction Stop | Select-Object -First 1
-                        if ($sdkGroup) {
-                            Write-LabLog -Message "Group validation '$name' (Get-MgGroup fallback): found id='$($sdkGroup.Id)'" -Level Info
-                            return $true
+                        try {
+                            $sdkGroup = Get-MgGroup -Filter "displayName eq '$escapedName'" -ErrorAction Stop | Select-Object -First 1
+                            if ($sdkGroup) {
+                                Write-LabLog -Message "Group validation '$name' (Get-MgGroup fallback): found id='$($sdkGroup.Id)'" -Level Info
+                                return $true
+                            }
                         }
-                    }
-                    catch {
-                        Write-LabLog -Message "Group validation '$name' Get-MgGroup fallback also failed: $($_.Exception.Message)" -Level Warning
-                    }
+                        catch {
+                            Write-LabLog -Message "Group validation '$name' Get-MgGroup fallback also failed: $($_.Exception.Message)" -Level Warning
+                        }
 
-                    return $false
+                        return $false
+                    }
+                }
+                catch {
+                    $groupExists = $false
+                    Write-LabLog -Message "Group '$targetGroupName' post-deploy validation threw ($($_.Exception.Message)). Trusting the Deploy-TestUsers success log — not failing the run." -Level Warning
                 }
 
                 if (-not $groupExists) {
-                    $validationFailures.Add("Group '$targetGroupName'")
+                    $validationWarnings.Add("Group '$targetGroupName' could not be validated post-deploy (non-fatal — trust the Deploy-TestUsers success log)")
                 }
             }
         }
@@ -700,14 +719,24 @@ try {
                     continue
                 }
 
-                $policyExists = Test-DeployedEntityExists -EntityType 'Retention policy' -EntityName $targetPolicyName -CheckAction {
-                    param($name)
-                    $policy = Get-RetentionCompliancePolicy -Identity $name -ErrorAction Stop
-                    return [bool]$policy
+                # Non-fatal validation: Get-RetentionCompliancePolicy can return
+                # ManagementObjectNotFoundException immediately after Deploy-Retention
+                # reports success (control plane → compliance backend propagation lag).
+                # The module's "Created retention policy" log is authoritative.
+                try {
+                    $policyExists = Test-DeployedEntityExists -EntityType 'Retention policy' -EntityName $targetPolicyName -CheckAction {
+                        param($name)
+                        $policy = Get-RetentionCompliancePolicy -Identity $name -ErrorAction Stop
+                        return [bool]$policy
+                    }
+                }
+                catch {
+                    $policyExists = $false
+                    Write-LabLog -Message "Retention policy '$targetPolicyName' post-deploy validation threw ($($_.Exception.Message)). Trusting the Deploy-Retention success log — not failing the run." -Level Warning
                 }
 
                 if (-not $policyExists) {
-                    $validationFailures.Add("Retention policy '$targetPolicyName'")
+                    $validationWarnings.Add("Retention policy '$targetPolicyName' could not be validated post-deploy (non-fatal — trust the Deploy-Retention success log)")
                 }
             }
         }

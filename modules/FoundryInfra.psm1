@@ -1291,14 +1291,14 @@ function Publish-TeamsApps {
     Write-LabLog -Message 'Publishing agent packages to Teams app catalog...' -Level Info
     $published = [System.Collections.Generic.List[PSCustomObject]]::new()
 
-    # Require an existing Graph context with the right scope. In -FoundryOnly
-    # mode Graph isn't connected at startup, and attempting to Connect-MgGraph
-    # here blocks on interactive browser auth and then times out.
+    # Require an existing Graph context with the right scope. Deploy.ps1 now
+    # connects Graph with AppCatalog.ReadWrite.All in every mode (including
+    # -FoundryOnly), so this should only fire when -SkipAuth is used.
     $mgContext = $null
     try { $mgContext = Get-MgContext -ErrorAction SilentlyContinue } catch { $mgContext = $null }
     $hasScope = $mgContext -and ($mgContext.Scopes -contains 'AppCatalog.ReadWrite.All')
     if (-not $hasScope) {
-        Write-LabLog -Message 'Teams catalog publish skipped: Microsoft Graph not connected with AppCatalog.ReadWrite.All (run without -FoundryOnly to publish).' -Level Warning
+        Write-LabLog -Message 'Teams catalog publish skipped: Microsoft Graph not connected with AppCatalog.ReadWrite.All.' -Level Warning
         return @()
     }
 

@@ -113,6 +113,12 @@ function Connect-LabServices {
         [switch]$SkipGraph,
 
         [Parameter()]
+        [string[]]$GraphScopes,
+
+        [Parameter()]
+        [switch]$UseDeviceCode,
+
+        [Parameter()]
         [switch]$ConnectAzure,
 
         [Parameter()]
@@ -146,15 +152,20 @@ function Connect-LabServices {
     }
 
     if (-not $SkipGraph) {
-        $graphScopes = @(
-            'User.ReadWrite.All'
-            'Group.ReadWrite.All'
-            'Organization.Read.All'
-            'Policy.ReadWrite.ConditionalAccess'
-            'Policy.Read.All'
-            'eDiscovery.ReadWrite.All'
-            'AppCatalog.ReadWrite.All'
-        )
+        if ($PSBoundParameters.ContainsKey('GraphScopes') -and $GraphScopes -and $GraphScopes.Count -gt 0) {
+            $graphScopes = $GraphScopes
+        }
+        else {
+            $graphScopes = @(
+                'User.ReadWrite.All'
+                'Group.ReadWrite.All'
+                'Organization.Read.All'
+                'Policy.ReadWrite.ConditionalAccess'
+                'Policy.Read.All'
+                'eDiscovery.ReadWrite.All'
+                'AppCatalog.ReadWrite.All'
+            )
+        }
 
         # Reuse an existing Graph context if one is already present and belongs to the
         # requested tenant. Previously we called Disconnect-MgGraph unconditionally, which
@@ -180,7 +191,14 @@ function Connect-LabServices {
                 Write-Verbose "Existing Graph context missing scopes ($($missingScopes -join ', ')) — reconnecting."
             }
             Write-Verbose "Connecting to Microsoft Graph (tenant: $TenantId)..."
-            Connect-MgGraph -TenantId $TenantId -Scopes $graphScopes -NoWelcome -ErrorAction Stop
+            $mgParams = @{
+                TenantId    = $TenantId
+                Scopes      = $graphScopes
+                NoWelcome   = $true
+                ErrorAction = 'Stop'
+            }
+            if ($UseDeviceCode) { $mgParams['UseDeviceCode'] = $true }
+            Connect-MgGraph @mgParams
         }
 
         $graphContext = Get-MgContext

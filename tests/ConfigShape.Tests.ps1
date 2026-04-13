@@ -65,11 +65,17 @@ Describe 'DLP scope (Entra-registered AI app)' {
         $foundryDlp | Should -Not -BeNullOrEmpty
     }
 
-    It 'Declares a targetedEntraAppDisplayName for app-scoped DLP rules' {
+    It 'Declares target Entra app(s) for app-scoped DLP rules' {
         $foundryDlp = @($script:Config.workloads.dlp.policies) |
             Where-Object { $_.PSObject.Properties['scope'] -and $_.scope -eq 'entraRegisteredAiApp' } |
             Select-Object -First 1
-        $foundryDlp.targetedEntraAppDisplayName | Should -Not -BeNullOrEmpty
+        # Accept either the singular `targetedEntraAppDisplayName` (legacy) or the
+        # plural `targetedEntraAppDisplayNames` (preferred — covers all bot apps).
+        $hasSingular = $foundryDlp.PSObject.Properties['targetedEntraAppDisplayName'] -and
+                       -not [string]::IsNullOrWhiteSpace([string]$foundryDlp.targetedEntraAppDisplayName)
+        $hasPlural = $foundryDlp.PSObject.Properties['targetedEntraAppDisplayNames'] -and
+                     @($foundryDlp.targetedEntraAppDisplayNames).Count -gt 0
+        ($hasSingular -or $hasPlural) | Should -BeTrue
     }
 
     It 'Does NOT use CopilotExperiences location (wrong for custom Foundry agents)' {

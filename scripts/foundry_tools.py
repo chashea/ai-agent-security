@@ -13,6 +13,7 @@ import argparse
 import json
 import logging
 import sys
+import time
 
 import requests
 from azure.identity import DefaultAzureCredential
@@ -23,6 +24,63 @@ logging.basicConfig(
     stream=sys.stderr,
 )
 log = logging.getLogger(__name__)
+
+
+def _retry_request(
+    method: str,
+    url: str,
+    max_attempts: int = 6,
+    base_delay: float = 3.0,
+    **kwargs,
+) -> requests.Response:
+    """requests.{method} with retry on SSL / timeout / 5xx errors.
+
+    Fresh Foundry control-plane connections can intermittently return
+    transport errors during the warmup window. This wrapper retries those
+    with exponential backoff; non-retriable 4xx errors raise immediately.
+    """
+    method_func = getattr(requests, method.lower())
+    last_exc: Exception | None = None
+    for attempt in range(1, max_attempts + 1):
+        try:
+            resp = method_func(url, **kwargs)
+            if 500 <= resp.status_code < 600 and attempt < max_attempts:
+                log.warning(
+                    "HTTP %d on %s %s (attempt %d/%d) — retrying",
+                    resp.status_code,
+                    method,
+                    url,
+                    attempt,
+                    max_attempts,
+                )
+                time.sleep(base_delay * attempt)
+                continue
+            return resp
+        except (
+            requests.exceptions.SSLError,
+            requests.exceptions.ConnectionError,
+            requests.exceptions.Timeout,
+            requests.exceptions.ChunkedEncodingError,
+        ) as exc:
+            last_exc = exc
+            if attempt < max_attempts:
+                delay = base_delay * attempt
+                log.warning(
+                    "Transient transport error on %s %s (attempt %d/%d): %s — "
+                    "retrying in %.1fs",
+                    method,
+                    url,
+                    attempt,
+                    max_attempts,
+                    type(exc).__name__,
+                    delay,
+                )
+                time.sleep(delay)
+                continue
+            break
+    if last_exc is not None:
+        raise last_exc
+    raise RuntimeError(f"Exhausted {max_attempts} retries on {method} {url}")
 
 
 def _get_token(credential: DefaultAzureCredential, scope: str) -> str:
@@ -66,7 +124,7 @@ def create_connection(
     headers = _arm_headers(arm_token)
 
     # Check if exists
-    check = requests.get(url, headers=headers)
+    check = _retry_request("GET", url, headers=headers)
     if check.status_code == 200:
         log.info("Connection already exists: %s", connection_name)
         result = check.json()
@@ -84,7 +142,7 @@ def create_connection(
     if metadata:
         body["properties"]["metadata"] = metadata
 
-    resp = requests.put(url, json=body, headers=headers)
+    resp = _retry_request("PUT", url, json=body, headers=headers)
     if resp.status_code < 400:
         result = resp.json()
         log.info("Created connection: %s (%s)", connection_name, connection_type)
@@ -241,17 +299,28 @@ def build_tool_definitions(
             })
 
         elif tool_type == "bing_grounding":
-            # The Bing Search API has been retired (aka.ms/BingAPIsRetirement).
-            # Foundry's built-in bing_grounding uses the project's managed web
-            # search, so we only include project_connection_id if one was
-            # explicitly created (for custom / legacy Bing resources).
-            search_config: dict = {"market": "en-US", "count": 5}
+            # The preview API now requires project_connection_id on every
+            # search_configurations entry (previously accepted empty/missing).
+            # If no Grounding with Bing Search connection is configured on the
+            # project we skip the tool rather than emit an invalid payload —
+            # creating the agent otherwise fails the whole deploy.
+            bing_conn_id = ""
             if connection_ids and "bingSearch" in connection_ids:
-                search_config["project_connection_id"] = connection_ids["bingSearch"].get("id", "")
+                bing_conn_id = connection_ids["bingSearch"].get("id", "")
+            if not bing_conn_id:
+                log.warning(
+                    "bing_grounding tool skipped: no Grounding with Bing Search "
+                    "connection configured (set workloads.foundry.connections.bingSearch)."
+                )
+                continue
             definitions.append({
                 "type": "bing_grounding",
                 "bing_grounding": {
-                    "search_configurations": [search_config],
+                    "search_configurations": [{
+                        "project_connection_id": bing_conn_id,
+                        "market": "en-US",
+                        "count": 5,
+                    }],
                 },
             })
 
@@ -343,21 +412,16 @@ def build_tool_definitions(
             })
 
         elif tool_type == "a2a":
-            a2a_agents = []
-            if agents_manifest:
-                for a in agents_manifest:
-                    base_url = a.get("baseUrl", "")
-                    if base_url:
-                        a2a_agents.append({
-                            "name": a.get("name", ""),
-                            "url": base_url,
-                            "description": a.get("description", ""),
-                        })
-            if a2a_agents:
-                definitions.append({
-                    "type": "a2a_preview",
-                    "a2a_preview": {"agents": a2a_agents},
-                })
+            # a2a_preview is a Foundry preview tool. The public API shape is in
+            # flux — current builds of 2025-05-15-preview reject both the
+            # per-peer {name, base_url} shape and the tool-level
+            # {base_url}/{project_connection_id} shape we've tried. Skipping
+            # until the canonical schema is confirmed to avoid breaking the
+            # whole agent payload (a failed tool aborts the entire create).
+            log.warning(
+                "a2a tool skipped: a2a_preview schema is not stable in the "
+                "current preview API — tracked for follow-up."
+            )
 
         elif tool_type == "image_generation":
             definitions.append({"type": "image_generation"})

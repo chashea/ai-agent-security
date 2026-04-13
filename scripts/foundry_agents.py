@@ -14,6 +14,7 @@ import argparse
 import json
 import logging
 import sys
+import time
 
 import requests
 from azure.identity import DefaultAzureCredential
@@ -38,6 +39,73 @@ def _data_headers(token: str) -> dict:
     return {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
 
 
+# ── Retry wrapper for Foundry data-plane endpoint ────────────────────────────
+#
+# Freshly-created Foundry accounts on `services.ai.azure.com` can return
+# transient SSL EOF errors, connection timeouts, and 5xx responses for 2-5
+# minutes after the control-plane PUT succeeds. This wrapper retries those
+# specific failure modes with exponential backoff so a single flaky socket
+# doesn't kill an entire deploy.
+
+
+def _retry_request(
+    method: str,
+    url: str,
+    max_attempts: int = 6,
+    base_delay: float = 3.0,
+    **kwargs,
+) -> requests.Response:
+    """requests.{method} with retry on SSL / timeout / 5xx errors.
+
+    Dispatches to ``requests.get``/``requests.post``/etc. via getattr so
+    existing unit tests that patch those module-level attributes still
+    intercept the calls. Non-retriable errors (4xx, auth, etc.) raise
+    immediately so callers can branch on them.
+    """
+    method_func = getattr(requests, method.lower())
+    last_exc: Exception | None = None
+    for attempt in range(1, max_attempts + 1):
+        try:
+            resp = method_func(url, **kwargs)
+            if 500 <= resp.status_code < 600 and attempt < max_attempts:
+                log.warning(
+                    "HTTP %d on %s %s (attempt %d/%d) — retrying",
+                    resp.status_code,
+                    method,
+                    url,
+                    attempt,
+                    max_attempts,
+                )
+                time.sleep(base_delay * attempt)
+                continue
+            return resp
+        except (
+            requests.exceptions.SSLError,
+            requests.exceptions.ConnectionError,
+            requests.exceptions.Timeout,
+            requests.exceptions.ChunkedEncodingError,
+        ) as exc:
+            last_exc = exc
+            if attempt < max_attempts:
+                delay = base_delay * attempt
+                log.warning(
+                    "Transient transport error on %s %s (attempt %d/%d): %s — "
+                    "retrying in %.1fs",
+                    method,
+                    url,
+                    attempt,
+                    max_attempts,
+                    type(exc).__name__,
+                    delay,
+                )
+                time.sleep(delay)
+                continue
+            break
+    if last_exc is not None:
+        raise last_exc
+    raise RuntimeError(f"Exhausted {max_attempts} retries on {method} {url}")
+
+
 # ── Purview Governance ───────────────────────────────────────────────────────
 
 
@@ -48,7 +116,7 @@ def enable_purview_governance(
     url = f"{project_endpoint}/governance/settings?api-version={agent_api_version}"
     body = {"purviewIntegrationEnabled": True}
     try:
-        resp = requests.put(url, json=body, headers=_data_headers(data_token))
+        resp = _retry_request("PUT", url, json=body, headers=_data_headers(data_token))
         if resp.status_code < 400:
             log.info("Purview governance integration enabled.")
             return True
@@ -130,14 +198,25 @@ def create_agent(
     """
     headers = _data_headers(data_token)
 
-    # Idempotency: check if agent already exists
+    # Rerun idempotency: if the agent already exists, delete it so the new
+    # definition (tools, instructions, metadata) replaces it cleanly. Foundry
+    # prompt agents do not expose a PATCH endpoint and returning early on
+    # existence causes stale tool state to persist across redeploys.
     check_url = (
         f"{project_endpoint}/agents/{agent_name}?api-version={agent_api_version}"
     )
-    check_resp = requests.get(check_url, headers=headers)
+    check_resp = _retry_request("GET", check_url, headers=headers)
     if check_resp.status_code == 200:
-        log.info("Agent already exists: %s", agent_name)
-        return {"id": agent_name, "name": agent_name, "model": model}
+        log.info("Agent already exists — replacing: %s", agent_name)
+        del_resp = _retry_request("DELETE", check_url, headers=headers)
+        if del_resp.status_code >= 400:
+            log.warning(
+                "Could not replace existing agent '%s' (DELETE HTTP %d): %s",
+                agent_name,
+                del_resp.status_code,
+                del_resp.text,
+            )
+            return None
 
     # Create agent
     url = f"{project_endpoint}/agents?api-version={agent_api_version}"
@@ -151,7 +230,7 @@ def create_agent(
     if description:
         payload["description"] = description
 
-    resp = requests.post(url, json=payload, headers=headers)
+    resp = _retry_request("POST", url, json=payload, headers=headers)
     if resp.status_code < 400:
         result = resp.json()
         agent_id = result.get("id", agent_name)
@@ -172,7 +251,7 @@ def delete_agent(
 ) -> bool:
     """Delete an agent by ID."""
     url = f"{project_endpoint}/agents/{agent_id}?api-version={agent_api_version}"
-    resp = requests.delete(url, headers=_data_headers(data_token))
+    resp = _retry_request("DELETE", url, headers=_data_headers(data_token))
     if resp.status_code < 400:
         log.info("Deleted agent: %s (%s)", agent_name, agent_id)
         return True
@@ -200,7 +279,7 @@ def publish_application(
     headers = _arm_headers(arm_token)
 
     # Check if already published
-    check_resp = requests.get(app_url, headers=headers)
+    check_resp = _retry_request("GET", app_url, headers=headers)
     if check_resp.status_code == 200:
         base_url = check_resp.json().get("properties", {}).get("baseUrl", "")
         log.info("Application already published: %s", agent_name)
@@ -212,7 +291,7 @@ def publish_application(
             "agents": [{"agentName": agent_name}],
         }
     }
-    resp = requests.put(app_url, json=body, headers=headers)
+    resp = _retry_request("PUT", app_url, json=body, headers=headers)
     if resp.status_code < 400:
         base_url = resp.json().get("properties", {}).get("baseUrl", "")
         log.info("Published agent: %s -> %s", agent_name, base_url)
@@ -239,7 +318,7 @@ def unpublish_application(
         f"{account_path}/projects/{project_name}/applications/{agent_name}"
         f"?api-version={app_api_version}"
     )
-    resp = requests.delete(app_url, headers=_arm_headers(arm_token))
+    resp = _retry_request("DELETE", app_url, headers=_arm_headers(arm_token))
     if resp.status_code < 400:
         log.info("Unpublished application: %s", agent_name)
         return True

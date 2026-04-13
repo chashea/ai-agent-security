@@ -213,10 +213,13 @@ errors.
 CRUD — the data-plane `<projectEndpoint>/connections` returns HTTP 405
 on PUT. `scripts/foundry_tools.py setup_connections()` uses ARM.
 
-**Bing Search connection is skipped.** The Bing Search API has been retired
-(aka.ms/BingAPIsRetirement). Foundry's built-in `bing_grounding` tool uses
-the project's managed web search with no project connection required —
-emit the tool without a `project_connection_id` field.
+**Bing grounding requires a project connection.** The `bing_grounding`
+tool's `search_configurations[].project_connection_id` is now a **required**
+field on the preview API (earlier builds accepted empty strings / missing
+fields — that was the pre-v0.8 assumption). If no `Grounding with Bing
+Search` connection exists on the project, `foundry_tools.py` skips the
+tool and emits a warning. Provision a Bing Search resource and add it via
+`workloads.foundry.connections.bingSearch` to enable web grounding.
 
 **Blob Storage connection metadata.** `AzureBlob` connections require
 `properties.metadata.ContainerName` and `properties.metadata.AccountName`
@@ -233,15 +236,60 @@ skipped entirely on each agent (otherwise Foundry shows the agent as
   NOT the OpenAI Chat Completions nested `{type, function: {...}}`.
 - `sharepoint_grounding_preview`, `a2a_preview`, etc. — the nested property
   key must match the `type` field exactly.
+- `a2a_preview` **temporarily disabled** in `foundry_tools.py` (2026-04-13).
+  The preview API rejects every shape tried so far (per-peer `{name, url}`,
+  per-peer `{name, base_url}`, tool-level `{base_url}` or
+  `{project_connection_id}`) with HTTP 400 "At least one of base_url or
+  project_connection_id must be specified for A2A tools." The tool is
+  skipped with a warning until the canonical schema is confirmed. Config
+  can still reference `{"type": "a2a"}` — the builder will log-and-skip.
+
+**PowerShell → Python JSON depth must be 20+.** `Invoke-FoundryPython`
+in `modules/Foundry.psm1` serializes `$InputData` with `ConvertTo-Json
+-Depth 20`. The depth-10 default truncates deeply nested objects like
+`openapi.config.paths` to `@{...}` PowerShell-hashtable strings, which
+Python then reads as literal strings and Foundry accepts without
+error — producing an agent with an unusable OpenAPI tool. Do not lower
+the depth.
+
+**Agent update path requires delete-then-recreate.** `scripts/foundry_agents.py
+create_agent` checks for an existing agent by name; if present, it
+`DELETE`s before issuing the `POST`. Foundry prompt agents have no PATCH
+endpoint, so returning early on existence leaves stale tool state on the
+server (old tools, old instructions, missing new tools). This means
+mid-deploy `create_agent` failures will leave the agent deleted — any
+tool builder bug is now a hard error rather than a silent "tools not
+refreshed" warning.
 
 **Teams catalog publishing is idempotent.** `New-FoundryAgentPackage` emits
 a deterministic `manifest.json` id (`MD5(prefix/shortName)` rendered as a
 GUID) and a monotonic `version` (`1.<mmdd>.<hhmmss>` UTC). `Publish-TeamsApps`
 matches existing tenant apps by `externalId`, so reruns update the existing
-app rather than creating duplicates. The publish step requires a pre-existing
-`MgContext` with `AppCatalog.ReadWrite.All` — in `-FoundryOnly` mode, the
-deploy does not connect Graph itself, so connect manually first or run a
-full deploy.
+app rather than creating duplicates. `-FoundryOnly` mode now connects
+Graph with `AppCatalog.ReadWrite.All` via device code (see `Deploy.ps1`
+auth step) — no more "skipped: Graph not connected" warning. The
+`HTTP 403 Forbidden` on `/appCatalogs/teamsApps` means the signed-in
+user lacks tenant-level Teams admin rights OR custom app upload is
+disabled at the tenant level (common on MCAPS tenants). Sideload the
+zipped packages in `packages/foundry/*.zip` per-user instead.
+
+**`-FoundryOnly` Graph authentication.** Deploy.ps1 used to skip Graph
+connect entirely in `-FoundryOnly` mode. It now connects Graph with a
+minimal scope set (`AppCatalog.ReadWrite.All` only) using
+`-UseDeviceCode`, which works in both interactive shells and background
+pwsh (the default browser/broker flow hangs when stdin is not a TTY).
+MSAL caches the refresh token to `~/.IdentityService`, so subsequent
+reruns within the token lifetime complete silently.
+
+**Python `DefaultAzureCredential` follows the az CLI default.** PowerShell
+`Connect-AzAccount` and `az login` maintain **separate** contexts. The
+Python scripts (`foundry_tools.py`, `foundry_agents.py`,
+`foundry_knowledge.py`) use `DefaultAzureCredential`, which falls through
+to `AzureCliCredential` — so `az account show` must point at the target
+subscription/tenant before any deploy runs. Symptom of a mismatch: every
+data-plane call returns `HTTP 401 wrong issuer` or `HTTP 400 Token tenant
+does not match resource tenant`. Fix with
+`az account set --subscription <id>`.
 
 **Evaluations pipeline may be unavailable.** `foundry_evals.py` probes
 `/evaluations` at startup and skips the entire pipeline with a single warning

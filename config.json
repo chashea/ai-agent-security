@@ -337,7 +337,12 @@
         {
           "name": "AI Agent - PII Prompt Protection (Foundry Agents)",
           "scope": "entraRegisteredAiApp",
-          "targetedEntraAppDisplayName": "aisec-foundry-agents",
+          "targetedEntraAppDisplayNames": [
+            "AISec-HR-Helpdesk-Bot",
+            "AISec-Finance-Analyst-Bot",
+            "AISec-IT-Support-Bot",
+            "AISec-Sales-Research-Bot"
+          ],
           "targetedEntraAppId": null,
           "rules": [
             {
