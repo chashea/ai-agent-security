@@ -62,6 +62,50 @@ def enable_purview_governance(
     return False
 
 
+# ── User Security Context (Azure OpenAI `user_security_context`) ─────────────
+#
+# Microsoft Purview Data Security Policies for Foundry interactions only
+# enforce against API calls that use an Entra user-context token OR that
+# explicitly include the `user_security_context` field. Without this,
+# interactions appear in Purview Audit and DSPM for AI Activity Explorer
+# only — DLP / IRM / Communication Compliance never fire.
+#
+# The deploy script creates agent definitions, not chat completions. The
+# runtime code that calls the agent (or the Azure OpenAI chat completions
+# endpoint directly) must construct this payload per call. This helper is
+# the canonical shape the runtime should use, and mirrors the schema at
+# https://learn.microsoft.com/azure/defender-for-cloud/gain-end-user-context-ai
+# and
+# https://learn.microsoft.com/azure/ai-foundry/openai/reference-preview#usersecuritycontext
+
+
+def build_user_security_context(
+    end_user_id: str | None = None,
+    source_ip: str | None = None,
+    application_name: str | None = None,
+) -> dict:
+    """Build a user_security_context dict for Azure OpenAI chat completion calls.
+
+    All fields are optional per the Azure OpenAI schema. Purview policies
+    require at least one of `end_user_id` (Entra object ID of the user) or
+    an Entra user-context bearer token on the request. For demo and audit
+    surfacing, also pass `application_name` so Defender for Cloud alerts
+    attribute activity to this specific Foundry deployment.
+
+    The returned dict uses the JSON field names expected by the Azure
+    OpenAI REST API (camelCase), not the Python snake_case parameter
+    names.
+    """
+    ctx: dict = {}
+    if end_user_id:
+        ctx["endUserId"] = end_user_id
+    if source_ip:
+        ctx["sourceIP"] = source_ip
+    if application_name:
+        ctx["applicationName"] = application_name
+    return ctx
+
+
 # ── Agent CRUD ───────────────────────────────────────────────────────────────
 
 
@@ -74,8 +118,16 @@ def create_agent(
     instructions: str,
     description: str | None = None,
     tools: list[dict] | None = None,
+    application_name: str | None = None,
 ) -> dict | None:
-    """Create a prompt agent with optional tools. Returns agent dict or None."""
+    """Create a prompt agent with optional tools. Returns agent dict or None.
+
+    When ``application_name`` is supplied the agent definition is tagged
+    with metadata so that downstream chat completion calls can construct a
+    user_security_context with the same ``applicationName`` — see
+    ``build_user_security_context`` and
+    docs/foundry-purview-integration.md §3.
+    """
     headers = _data_headers(data_token)
 
     # Idempotency: check if agent already exists
@@ -92,6 +144,8 @@ def create_agent(
     definition: dict = {"kind": "prompt", "model": model, "instructions": instructions}
     if tools:
         definition["tools"] = tools
+    if application_name:
+        definition.setdefault("metadata", {})["applicationName"] = application_name
 
     payload: dict = {"name": agent_name, "definition": definition}
     if description:
@@ -229,12 +283,32 @@ def deploy(config: dict) -> dict:
         project_endpoint, data_token, agent_api_version
     )
 
+    # 1b. user_security_context propagation signal
+    # PowerShell Foundry.psm1 passes `userSecurityContextEnabled` through the
+    # input JSON. When set, we tag each agent definition with an
+    # applicationName so runtime callers can construct the matching
+    # user_security_context payload. Without an Entra user-context token or
+    # an explicit user_security_context on chat completions, Purview policies
+    # will NOT enforce on these agents — see
+    # docs/foundry-purview-integration.md §3.
+    user_security_context_enabled = bool(
+        config.get("userSecurityContextEnabled", False)
+    )
+    if user_security_context_enabled:
+        log.info(
+            "userSecurityContext enabled — tagging each agent with applicationName "
+            "metadata. Runtime callers MUST include user_security_context (with at "
+            "least endUserId) or an Entra user-context bearer token on Azure OpenAI "
+            "calls for Purview DLP/IRM/CC policies to fire."
+        )
+
     # 2. Create agents (with tools if provided)
     agents = []
     tool_definitions = config.get("toolDefinitions", {})
     for agent_cfg in config.get("agents", []):
         agent_name = f"{prefix}-{agent_cfg['name']}"
         agent_tools = tool_definitions.get(agent_cfg["name"])
+        agent_application_name = agent_name if user_security_context_enabled else None
         result = create_agent(
             project_endpoint=project_endpoint,
             data_token=data_token,
@@ -244,10 +318,13 @@ def deploy(config: dict) -> dict:
             instructions=agent_cfg["instructions"],
             description=agent_cfg.get("description"),
             tools=agent_tools,
+            application_name=agent_application_name,
         )
         if result:
             if agent_tools:
                 result["toolCount"] = len(agent_tools)
+            if agent_application_name:
+                result["applicationName"] = agent_application_name
             agents.append(result)
 
     # 3. Publish as applications
@@ -264,6 +341,7 @@ def deploy(config: dict) -> dict:
 
     return {
         "purviewIntegrationEnabled": purview_enabled,
+        "userSecurityContextEnabled": user_security_context_enabled,
         "agents": agents,
     }
 

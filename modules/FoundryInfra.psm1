@@ -1137,6 +1137,106 @@ function Remove-TeamsApps {
     catch { Write-LabLog -Message "Teams catalog removal skipped: $($_.Exception.Message)" -Level Warning }
 }
 
+function Enable-FoundryPurviewDataSecurity {
+    <#
+    .SYNOPSIS
+        Enables Microsoft Purview Data Security on the Foundry subscription.
+
+    .DESCRIPTION
+        Prerequisite for Microsoft Purview to see Foundry prompts/responses.
+        Targets the Defender for Cloud "Enable Data Security for Azure AI with
+        Microsoft Purview" toggle on the AI services plan. See
+        docs/foundry-purview-integration.md §1.
+
+        Safe to call repeatedly — the underlying REST call is idempotent.
+        If the REST path is unavailable (preview API changes, tenant without
+        Defender for Cloud, MCAPS governance), logs a Warning with manual
+        portal steps and returns $false rather than throwing.
+
+    .PARAMETER SubscriptionId
+        Azure subscription ID that hosts the Foundry account.
+
+    .OUTPUTS
+        [bool] — $true if the toggle was confirmed on, $false if manual
+        portal action is required.
+    #>
+    [CmdletBinding(SupportsShouldProcess)]
+    [OutputType([bool])]
+    param(
+        [Parameter(Mandatory)]
+        [string]$SubscriptionId
+    )
+
+    Write-LabLog -Message "Verifying Purview Data Security toggle on subscription $SubscriptionId (Defender for Cloud AI services plan)." -Level Info
+
+    $apiVersion = '2024-01-01'
+    $pricingPath = "/subscriptions/$SubscriptionId/providers/Microsoft.Security/pricings/AI"
+
+    # Sanity check: ensure the Purview service principal is present in the tenant.
+    # App ID from Microsoft Learn: azure/defender-for-cloud/ai-onboarding#troubleshooting
+    $purviewSpAppId = '9ec59623-ce40-4dc8-a635-ed0275b5d58a'
+    try {
+        $spExists = Get-AzADServicePrincipal -ApplicationId $purviewSpAppId -ErrorAction SilentlyContinue
+        if (-not $spExists) {
+            Write-LabLog -Message "Microsoft Purview service principal ($purviewSpAppId) is NOT registered in this tenant. The Defender for Cloud data security toggle may fail. Create it via: New-AzADServicePrincipal -ApplicationId '$purviewSpAppId'" -Level Warning
+        }
+        else {
+            Write-LabLog -Message 'Microsoft Purview service principal is registered in the tenant.' -Level Info
+        }
+    }
+    catch {
+        Write-LabLog -Message "Could not query for Microsoft Purview service principal: $($_.Exception.Message). Continuing." -Level Warning
+    }
+
+    try {
+        $current = Invoke-ArmGet -Path $pricingPath -ApiVersion $apiVersion -ErrorAction Stop
+    }
+    catch {
+        Write-LabLog -Message "Could not read Microsoft.Security/pricings/AI on subscription ${SubscriptionId}: $($_.Exception.Message). Enable Data Security for Azure AI manually via Defender for Cloud → Environment settings → AI services → Settings → Enable data security for AI interactions." -Level Warning
+        return $false
+    }
+
+    # The extension name / field for the data security toggle is currently published as
+    # a subExtension on the AI services plan. Exact field name has moved between previews;
+    # we probe for common shapes and fall back to a warning if none match.
+    $currentExtensions = @()
+    if ($current -and $current.properties -and $current.properties.extensions) {
+        $currentExtensions = @($current.properties.extensions)
+    }
+
+    $dataSecurityExt = $currentExtensions | Where-Object { $_.name -match 'DataSecurity|PurviewDataSecurity|AIInteractions' } | Select-Object -First 1
+    if ($dataSecurityExt -and [bool]$dataSecurityExt.isEnabled) {
+        Write-LabLog -Message "Purview Data Security for AI interactions is already enabled on subscription $SubscriptionId." -Level Success
+        return $true
+    }
+
+    if (-not $PSCmdlet.ShouldProcess("subscription $SubscriptionId", 'Enable Purview Data Security for AI interactions')) {
+        return $false
+    }
+
+    $desiredBody = @{
+        properties = @{
+            pricingTier = 'Standard'
+            extensions  = @(
+                @{
+                    name      = 'PurviewDataSecurity'
+                    isEnabled = 'True'
+                }
+            )
+        }
+    }
+
+    try {
+        Invoke-ArmPut -Path $pricingPath -ApiVersion $apiVersion -Body $desiredBody -ErrorAction Stop | Out-Null
+        Write-LabLog -Message "Purview Data Security for AI interactions enabled on subscription $SubscriptionId." -Level Success
+        return $true
+    }
+    catch {
+        Write-LabLog -Message "Failed to enable Purview Data Security toggle via REST: $($_.Exception.Message). Enable manually via Defender for Cloud → Environment settings → select subscription $SubscriptionId → AI services → Settings → 'Enable data security for AI interactions' → On." -Level Warning
+        return $false
+    }
+}
+
 Export-ModuleMember -Function @(
     'Get-FoundryArmToken'
     'Get-FoundryDataToken'
@@ -1154,4 +1254,5 @@ Export-ModuleMember -Function @(
     'Remove-BotServices'
     'Publish-TeamsApps'
     'Remove-TeamsApps'
+    'Enable-FoundryPurviewDataSecurity'
 )

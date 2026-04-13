@@ -138,17 +138,20 @@ Constraints section.
 1. Foundry — agents + Defender for Cloud posture
 2. AgentIdentity — managed identity RBAC (auto-derived from tools)
 3. TestUsers — groups needed for policy scoping
-4. SensitivityLabels
-5. DLP
-6. Retention
-7. EDiscovery
-8. CommunicationCompliance
-9. InsiderRisk
-10. ConditionalAccess — MFA + risky sign-in block (report-only)
-11. MDCA — session monitoring + activity alerts + app governance
-12. AuditConfig
+4. SensitivityLabels (+ AI Search label-enforcement roles on the index MI)
+5. CollectionPolicies — DSPM-for-AI one-click collection policies (prerequisite for steps 6–10)
+6. DLP — Foundry rules scoped to an Entra-registered AI app (SIT-based block only)
+7. Retention — Enterprise AI apps location
+8. EDiscovery — `ItemClass:IPM.SkypeTeams.Message.ConnectedAIApp.AzureAI.<accountName>`
+9. CommunicationCompliance
+10. InsiderRisk — Risky AI usage template
+11. ConditionalAccess — MFA + risky sign-in block (report-only). **Adjacent identity control, not Purview-for-Foundry.**
+12. MDCA — session monitoring + activity alerts + app governance. **Adjacent SaaS control, not Purview-for-Foundry.**
+13. AuditConfig
 
 Removal is the exact reverse.
+
+**Foundry × Purview integration model:** see [`docs/foundry-purview-integration.md`](docs/foundry-purview-integration.md) for the authoritative mapping between `config.json` workload sections and Microsoft Learn sources, including the subscription-level Purview Data Security prerequisite, the user-security-context constraint, and per-capability shape (DLP app scope, retention location, eDiscovery ItemClass, AI Search label enforcement).
 
 ### Module Contract
 

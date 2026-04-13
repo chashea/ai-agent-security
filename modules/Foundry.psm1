@@ -151,6 +151,24 @@ function Deploy-Foundry {
         }
     }
 
+    # Enable Purview Data Security on the Foundry subscription (prerequisite for
+    # Purview policies to see Foundry interactions). See
+    # docs/foundry-purview-integration.md §1.
+    $purviewDataSecurityEnabled = $false
+    if ($fw.PSObject.Properties['purviewDataSecurity'] -and $fw.purviewDataSecurity -and [bool]$fw.purviewDataSecurity.enable) {
+        Write-LabStep -StepName 'PurviewDataSecurity' -Description 'Enabling Purview Data Security on the Foundry subscription'
+        $purviewDataSecurityEnabled = Enable-FoundryPurviewDataSecurity -SubscriptionId $subscriptionId
+    }
+    else {
+        Write-LabLog -Message 'foundry.purviewDataSecurity.enable is not set — skipping subscription-level Purview Data Security toggle. Purview policies will NOT see Foundry interactions until this is enabled manually.' -Level Warning
+    }
+    $manifest.purviewIntegrationEnabled = $purviewDataSecurityEnabled
+
+    # Surface the user security context requirement early so reviewers see it in logs
+    if ($fw.PSObject.Properties['userSecurityContext'] -and $fw.userSecurityContext -and [bool]$fw.userSecurityContext.enabled) {
+        Write-LabLog -Message 'foundry.userSecurityContext.enabled=true: Azure OpenAI calls MUST include user_security_context (or an Entra user token) for Purview DLP/IRM/CC policies to fire. See docs/foundry-purview-integration.md §3.' -Level Info
+    }
+
     $projectEndpoint = [string]$bicepResult.projectEndpoint
     $prefix          = [string]$Config.prefix
 
@@ -271,6 +289,11 @@ function Deploy-Foundry {
         }
     })
     $agentInput['toolDefinitions'] = $toolDefinitions
+    $agentInput['userSecurityContextEnabled'] = [bool](
+        $fw.PSObject.Properties['userSecurityContext'] -and
+        $fw.userSecurityContext -and
+        [bool]$fw.userSecurityContext.enabled
+    )
 
     try {
         $agentManifest = Invoke-FoundryPython -ScriptName 'foundry_agents.py' -Action 'deploy' -InputData $agentInput

@@ -13,6 +13,15 @@
       "projectName": "aisec-project",
       "modelDeploymentName": "gpt-4o",
       "embeddingsModel": "text-embedding-3-small",
+      "purviewDataSecurity": {
+        "enable": true,
+        "method": "defenderForCloud",
+        "notes": "Prerequisite for Purview to see Foundry prompts/responses. See docs/foundry-purview-integration.md §1. Toggle via Defender for Cloud ai-onboarding or Foundry portal compliance settings. Automatic enablement is out of scope for this repo; this block records the intent and is surfaced as a warning by Deploy-Foundry if the subscription has not been onboarded."
+      },
+      "userSecurityContext": {
+        "enabled": true,
+        "notes": "Purview Data Security Policies only enforce against Foundry calls that use an Entra user-context token or explicit userSecurityContext. See docs/foundry-purview-integration.md §3. Propagation through scripts/foundry_agents.py is out of scope for this repo; this flag records the intent."
+      },
       "connections": {
         "aiSearch": {
           "indexName": "aisec-compliance-index"
@@ -277,15 +286,45 @@
           "sensitiveInfoTypes": ["U.S. Social Security Number (SSN)"],
           "locations": ["Exchange", "SharePoint"]
         }
+      ],
+      "aiSearchEnforcement": {
+        "enabled": true,
+        "indexName": "aisec-compliance-index",
+        "notes": "Honor sensitivity labels at RAG query time. Requires AI Search sensitivity-label indexing (public preview) on the index, plus Content.SuperUser + UnifiedPolicy.Tenant.Read on the AI Search system-assigned managed identity. See docs/foundry-purview-integration.md §5.5.",
+        "managedIdentityRoles": [
+          "Content.SuperUser",
+          "UnifiedPolicy.Tenant.Read"
+        ]
+      }
+    },
+    "collectionPolicies": {
+      "enabled": true,
+      "notes": "DSPM-for-AI collection policies. Prerequisite for DLP, IRM, Communication Compliance, eDiscovery, and Retention to receive Foundry prompts/responses. See docs/foundry-purview-integration.md §5.1. Must deploy before those downstream workloads.",
+      "policies": [
+        {
+          "name": "DSPM for AI - Capture interactions for enterprise AI apps",
+          "recommendation": "Secure interactions from enterprise apps",
+          "appCategory": "EnterpriseAIApps",
+          "appFilter": "AzureAI"
+        },
+        {
+          "name": "DSPM for AI - Detect sensitive info shared with AI via network",
+          "recommendation": "Extend insights into sensitive data in AI app interactions",
+          "appCategory": "EnterpriseAIApps",
+          "appFilter": "AzureAI"
+        }
       ]
     },
     "dlp": {
       "enabled": true,
       "simulationMode": false,
+      "notes": "Foundry-agent DLP must be authored via New-DlpComplianceRule scoped to a specific Entra-registered AI app. See docs/foundry-purview-integration.md §5.2. Only SIT-based block rules are supported today — label-based DLP against the Foundry app scope is not GA and has been removed from this config.",
       "policies": [
         {
-          "name": "AI Agent - PII Prompt Protection",
-          "locations": ["EnterpriseAI"],
+          "name": "AI Agent - PII Prompt Protection (Foundry Agents)",
+          "scope": "entraRegisteredAiApp",
+          "targetedEntraAppDisplayName": "aisec-foundry-agents",
+          "targetedEntraAppId": null,
           "rules": [
             {
               "name": "Block PII Prompts - Elevated Risk",
@@ -340,42 +379,6 @@
               "enforcement": {
                 "action": "auditOnly",
                 "alert": { "enabled": true, "severity": "low" }
-              }
-            }
-          ]
-        },
-        {
-          "name": "AI Agent - Sensitivity Label Block",
-          "locations": ["CopilotExperiences"],
-          "rules": [
-            {
-              "name": "Block Highly Confidential AI-Restricted Content",
-              "sensitiveInfoTypes": [],
-              "minCount": 1,
-              "labels": ["AISec-Highly-Confidential-AI-Restricted"],
-              "enforcement": {
-                "action": "block",
-                "userNotification": {
-                  "enabled": true,
-                  "message": "This content is labeled Highly Confidential - AI Restricted and cannot be processed by AI agents."
-                },
-                "alert": { "enabled": true, "severity": "high" },
-                "incidentReport": { "enabled": true, "severity": "high" }
-              }
-            },
-            {
-              "name": "Block Executives-Only Content",
-              "sensitiveInfoTypes": [],
-              "minCount": 1,
-              "labels": ["AISec-Highly-Confidential-Executives-Only"],
-              "enforcement": {
-                "action": "block",
-                "userNotification": {
-                  "enabled": true,
-                  "message": "This content is restricted to executives and cannot be processed by AI agents."
-                },
-                "alert": { "enabled": true, "severity": "high" },
-                "incidentReport": { "enabled": true, "severity": "high" }
               }
             }
           ]
@@ -455,17 +458,19 @@
     },
     "retention": {
       "enabled": true,
+      "notes": "Foundry interactions are captured under the Enterprise AI apps retention location, not Exchange/OneDrive. See docs/foundry-purview-integration.md §5.3. Requires the collection policy from workloads.collectionPolicies to be in place first.",
       "policies": [
         {
           "name": "AI Interaction Retention - 1 Year",
           "retentionDays": 365,
           "retentionAction": "retainAndDelete",
-          "locations": ["Exchange", "OneDrive"]
+          "locations": ["EnterpriseAI"]
         }
       ]
     },
     "eDiscovery": {
       "enabled": true,
+      "notes": "Search Foundry prompts/responses by ItemClass = IPM.SkypeTeams.Message.ConnectedAIApp.AzureAI.<FoundryAccountName>. See docs/foundry-purview-integration.md §5.4.",
       "cases": [
         {
           "name": "AI-Governance-Investigation",
@@ -473,8 +478,8 @@
           "custodians": [
             "charlesshea@MngEnvMCAP648165.onmicrosoft.com"
           ],
-          "holdQuery": "AI OR Copilot OR \"sensitive data\" OR \"blocked prompt\"",
-          "searchQuery": "DlpRuleMatch OR AIInteraction OR FoundryAgent"
+          "holdQuery": "ItemClass:IPM.SkypeTeams.Message.ConnectedAIApp.AzureAI.aisec-foundry",
+          "searchQuery": "ItemClass:IPM.SkypeTeams.Message.ConnectedAIApp.AzureAI.aisec-foundry"
         }
       ]
     },
@@ -500,6 +505,7 @@
     },
     "conditionalAccess": {
       "enabled": true,
+      "notes": "Adjacent identity control — NOT part of the Microsoft Foundry × Purview capability matrix. See docs/foundry-purview-integration.md §7. Deployed as a defense-in-depth layer around agent principals, not as a Purview-for-Foundry control.",
       "policies": [
         {
           "name": "AI Agent MFA Required",
@@ -517,6 +523,7 @@
     "mdca": {
       "enabled": true,
       "portalUrl": "",
+      "notes": "Adjacent SaaS control (Microsoft Defender for Cloud Apps) — NOT part of the Microsoft Foundry × Purview capability matrix. See docs/foundry-purview-integration.md §7.",
       "policies": [
         {
           "name": "AI Agent Session Monitor",

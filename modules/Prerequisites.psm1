@@ -120,8 +120,29 @@ function Connect-LabServices {
     )
 
     if (-not $SkipExchange) {
-        Write-Verbose "Connecting to Security & Compliance PowerShell (tenant: $TenantId)..."
-        Connect-IPPSSession -CommandName * -WarningAction SilentlyContinue -ErrorAction Stop
+        # Reuse an existing active EXO/IPPS session if one is already on disk. MSAL caches
+        # refresh tokens in ~/.IdentityService (macOS/Linux), so subsequent Connect-* calls
+        # within the token's lifetime complete silently. Only open a browser when there's
+        # genuinely no active session.
+        $ippsActive = $false
+        try {
+            $connections = @(Get-ConnectionInformation -ErrorAction SilentlyContinue)
+            $ippsActive = [bool]($connections | Where-Object {
+                $_.ConnectionUri -like '*ps.compliance.protection.outlook.com*' -and
+                $_.TokenStatus -eq 'Active'
+            })
+        }
+        catch { $ippsActive = $false }
+
+        if ($ippsActive) {
+            Write-Verbose "Reusing existing active IPPS session."
+        }
+        else {
+            Write-Verbose "Connecting to Security & Compliance PowerShell (tenant: $TenantId)..."
+            # Do NOT pass -CommandName * — the REST-based IPPSSession interprets the wildcard
+            # literally and loads zero cmdlets. Omitting -CommandName loads the full cmdlet set.
+            Connect-IPPSSession -ShowBanner:$false -WarningAction SilentlyContinue -ErrorAction Stop
+        }
     }
 
     if (-not $SkipGraph) {
@@ -131,19 +152,27 @@ function Connect-LabServices {
             'Organization.Read.All'
             'Policy.ReadWrite.ConditionalAccess'
             'Policy.Read.All'
-            'CloudAppSecurity.Read.All'
             'eDiscovery.ReadWrite.All'
             'AppCatalog.ReadWrite.All'
         )
 
-        Write-Verbose "Connecting to Microsoft Graph (tenant: $TenantId)..."
-        Disconnect-MgGraph -ErrorAction SilentlyContinue
-        try {
-            Connect-MgGraph -TenantId $TenantId -Scopes $graphScopes -NoWelcome -ErrorAction Stop
+        # Reuse an existing Graph context if one is already present and belongs to the
+        # requested tenant. Previously we called Disconnect-MgGraph unconditionally, which
+        # wiped the in-memory context and forced a fresh browser / device code prompt every
+        # run. MSAL will refresh the token silently if it's still in the disk cache.
+        $existingContext = $null
+        try { $existingContext = Get-MgContext -ErrorAction SilentlyContinue } catch { $existingContext = $null }
+
+        $graphActive = $existingContext -and
+                       -not [string]::IsNullOrWhiteSpace($existingContext.Account) -and
+                       [string]$existingContext.TenantId -eq $TenantId
+
+        if ($graphActive) {
+            Write-Verbose "Reusing existing Microsoft Graph context: $($existingContext.Account)"
         }
-        catch {
-            Write-LabLog -Message 'Browser auth failed — falling back to device code flow.' -Level Warning
-            Connect-MgGraph -TenantId $TenantId -Scopes $graphScopes -NoWelcome -UseDeviceCode -ErrorAction Stop
+        else {
+            Write-Verbose "Connecting to Microsoft Graph (tenant: $TenantId)..."
+            Connect-MgGraph -TenantId $TenantId -Scopes $graphScopes -NoWelcome -ErrorAction Stop
         }
 
         $graphContext = Get-MgContext
@@ -548,6 +577,7 @@ function Test-LabConfigValidity {
         'insiderRisk'               = @('policies')
         'conditionalAccess'         = @('policies')
         'mdca'                      = @('policies')
+        'collectionPolicies'        = @('policies')
     }
 
     foreach ($workloadName in $workloadRequirements.Keys) {

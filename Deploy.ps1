@@ -117,9 +117,21 @@ try {
         Write-LabLog -Message 'Test user creation skipped (-SkipTestUsers).' -Level Info
     }
 
-    # Apply TestUsersMode override — defaults to 'create'
-    $effectiveMode = if (-not [string]::IsNullOrWhiteSpace($TestUsersMode)) { $TestUsersMode } else { 'create' }
+    # Apply TestUsersMode: CLI flag wins, else respect config, else default to 'create'
     if ($Config.workloads.PSObject.Properties['testUsers'] -and $Config.workloads.testUsers) {
+        $configHasMode = $Config.workloads.testUsers.PSObject.Properties['mode'] -and
+                         -not [string]::IsNullOrWhiteSpace($Config.workloads.testUsers.mode)
+
+        if (-not [string]::IsNullOrWhiteSpace($TestUsersMode)) {
+            $effectiveMode = $TestUsersMode
+        }
+        elseif ($configHasMode) {
+            $effectiveMode = $Config.workloads.testUsers.mode
+        }
+        else {
+            $effectiveMode = 'create'
+        }
+
         if ($Config.workloads.testUsers.PSObject.Properties['mode']) {
             $Config.workloads.testUsers.mode = $effectiveMode
         }
@@ -394,6 +406,13 @@ try {
         }
         else { Write-LabLog -Message 'sensitivityLabels workload is disabled, skipping.' -Level Info }
 
+        if ($Config.workloads.PSObject.Properties['collectionPolicies'] -and $Config.workloads.collectionPolicies.enabled) {
+            Invoke-Workload -Name 'collectionPolicies' -Step 'CollectionPolicies' -Description 'Deploying DSPM-for-AI collection policies (prerequisite for DLP/IRM/CC/eDiscovery/Retention)' -Action {
+                Deploy-CollectionPolicies -Config $Config -WhatIf:$WhatIfPreference
+            }
+        }
+        else { Write-LabLog -Message 'collectionPolicies workload is disabled, skipping.' -Level Info }
+
         if ($Config.workloads.PSObject.Properties['dlp'] -and $Config.workloads.dlp.enabled) {
             Invoke-Workload -Name 'dlp' -Step 'DLP' -Description 'Deploying DLP policies' -Action {
                 Deploy-DLP -Config $Config -WhatIf:$WhatIfPreference
@@ -483,9 +502,23 @@ try {
 
                 $groupExists = Test-DeployedEntityExists -EntityType 'Group' -EntityName $targetGroupName -CheckAction {
                     param($name)
+                    # Use Invoke-MgGraphRequest directly rather than Get-MgGroup -Filter.
+                    # The Get-MgGroup SDK cmdlet has been observed returning "Expected literal...
+                    # Was '<'" JSON-parse errors against this tenant — the raw request is more
+                    # predictable and lets us distinguish HTML (session state corruption) from
+                    # real 404s.
                     $escapedName = $name.Replace("'", "''")
-                    $group = Get-MgGroup -Filter "displayName eq '$escapedName'" -ErrorAction Stop | Select-Object -First 1
-                    return [bool]$group
+                    $uri = "/v1.0/groups?`$filter=displayName eq '$escapedName'&`$count=true"
+                    $response = Invoke-MgGraphRequest -Method GET -Uri $uri -Headers @{ 'ConsistencyLevel' = 'eventual' } -ErrorAction Stop
+                    $values = @()
+                    if ($response -is [System.Collections.IDictionary] -and $response.Contains('value')) {
+                        $values = @($response['value'])
+                    }
+                    elseif ($response.PSObject.Properties['value']) {
+                        $values = @($response.value)
+                    }
+                    Write-LabLog -Message "Group validation '$name': response value count = $($values.Count)" -Level Info
+                    return ($values.Count -gt 0)
                 }
 
                 if (-not $groupExists) {
@@ -667,16 +700,43 @@ try {
         if ($manifest.ContainsKey('eDiscovery') -and $manifest.eDiscovery -and $manifest.eDiscovery.cases) {
             foreach ($manifestCase in @($manifest.eDiscovery.cases)) {
                 $targetCaseName = [string]$manifestCase.caseName
+                $targetCaseId = [string]$manifestCase.caseId
                 if ([string]::IsNullOrWhiteSpace($targetCaseName)) {
                     continue
                 }
 
-                $caseExists = Test-DeployedEntityExists -EntityType 'eDiscovery case' -EntityName $targetCaseName -CheckAction {
+                # Prefer direct GET by caseId — avoids OData filter edge cases (URL encoding,
+                # eventual-consistency 404s on the filter endpoint) that don't affect a direct
+                # object lookup. Fall back to displayName filter if the manifest lacks an id.
+                $checkCase = {
                     param($name)
+                    if (-not [string]::IsNullOrWhiteSpace($targetCaseId)) {
+                        $response = Invoke-MgGraphRequest -Method GET -Uri "/v1.0/security/cases/ediscoveryCases/$targetCaseId" -ErrorAction Stop
+                        $caseObjId = $null
+                        if ($response -is [System.Collections.IDictionary] -and $response.Contains('id')) {
+                            $caseObjId = [string]$response['id']
+                        }
+                        elseif ($response.PSObject.Properties['id']) {
+                            $caseObjId = [string]$response.id
+                        }
+                        Write-LabLog -Message "eDiscovery case validation '$name': got id='$caseObjId'" -Level Info
+                        return (-not [string]::IsNullOrWhiteSpace($caseObjId))
+                    }
+
                     $filter = "displayName eq '$($name -replace "'","''")'"
                     $response = Invoke-MgGraphRequest -Method GET -Uri "/v1.0/security/cases/ediscoveryCases?`$filter=$filter" -ErrorAction Stop
-                    return ($response.value.Count -gt 0)
-                }
+                    $values = @()
+                    if ($response -is [System.Collections.IDictionary] -and $response.Contains('value')) {
+                        $values = @($response['value'])
+                    }
+                    elseif ($response.PSObject.Properties['value']) {
+                        $values = @($response.value)
+                    }
+                    Write-LabLog -Message "eDiscovery case validation '$name' (filter): value count = $($values.Count)" -Level Info
+                    return ($values.Count -gt 0)
+                }.GetNewClosure()
+
+                $caseExists = Test-DeployedEntityExists -EntityType 'eDiscovery case' -EntityName $targetCaseName -CheckAction $checkCase
 
                 if (-not $caseExists) {
                     $validationFailures.Add("eDiscovery case '$targetCaseName'")
@@ -798,8 +858,10 @@ catch {
     throw
 }
 finally {
-    if (-not $SkipAuth) {
-        Disconnect-LabServices
-    }
+    # Intentionally do NOT call Disconnect-LabServices here. Disconnect-MgGraph and
+    # Disconnect-ExchangeOnline clear the MSAL token cache for this client, so the next
+    # deploy would have to re-authenticate from scratch (browser/device code). Letting the
+    # process exit preserves the on-disk token cache so subsequent runs SSO silently until
+    # the refresh token expires.
     Complete-LabLogging
 }

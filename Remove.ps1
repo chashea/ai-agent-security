@@ -247,6 +247,15 @@ try {
             Write-LabLog -Message 'dlp workload is disabled, skipping.' -Level Info
         }
 
+        if ($Config.workloads.PSObject.Properties['collectionPolicies'] -and $Config.workloads.collectionPolicies.enabled) {
+            Write-LabStep -StepName 'CollectionPolicies' -Description 'Removing DSPM-for-AI collection policies'
+            Remove-CollectionPolicies -Config $Config -Manifest (Get-WorkloadManifest -WorkloadName 'collectionPolicies') -WhatIf:$WhatIfPreference
+            Write-LabLog -Message 'Collection policies removal complete.' -Level Success
+        }
+        else {
+            Write-LabLog -Message 'collectionPolicies workload is disabled, skipping.' -Level Info
+        }
+
         if ($Config.workloads.PSObject.Properties['sensitivityLabels'] -and $Config.workloads.sensitivityLabels.enabled) {
             Write-LabStep -StepName 'SensitivityLabels' -Description 'Removing sensitivity labels'
             Remove-SensitivityLabels -Config $Config -Manifest (Get-WorkloadManifest -WorkloadName 'sensitivityLabels') -WhatIf:$WhatIfPreference
