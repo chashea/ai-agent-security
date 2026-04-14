@@ -100,10 +100,16 @@ function Deploy-Retention {
 
                 if (-not $appPolicyExists) {
                     if ($PSCmdlet.ShouldProcess($appPolicyName, 'Create App retention compliance policy (Enterprise AI apps)')) {
+                        # The App* retention cmdlet's "Enterprise AI apps" bundle
+                        # (`User:Entrabased3PAIApps,ChatGPTEnterprise,AzureAIServices`)
+                        # implies mailbox-backed scope and the runtime validator
+                        # requires -ExchangeLocation to be set alongside
+                        # -Applications. "All" targets every mailbox in the tenant.
                         $appPolicyParams = @{
-                            Name         = $appPolicyName
-                            Applications = @($enterpriseAiAppIdentifier)
-                            Enabled      = $true
+                            Name             = $appPolicyName
+                            Applications     = @($enterpriseAiAppIdentifier)
+                            ExchangeLocation = 'All'
+                            Enabled          = $true
                         }
 
                         try {

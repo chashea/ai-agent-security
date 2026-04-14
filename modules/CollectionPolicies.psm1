@@ -33,10 +33,10 @@ function Deploy-CollectionPolicies {
         return @{ policies = @(); skipped = @(); manualRequired = @() }
     }
 
-    $setCommand = Get-Command -Name Set-FeatureConfiguration -ErrorAction SilentlyContinue
+    $newCommand = Get-Command -Name New-FeatureConfiguration -ErrorAction SilentlyContinue
     $getCommand = Get-Command -Name Get-FeatureConfiguration -ErrorAction SilentlyContinue
-    if (-not $setCommand -or -not $getCommand) {
-        Write-LabLog -Message 'Set-FeatureConfiguration / Get-FeatureConfiguration cmdlets are not available in this Security & Compliance PowerShell session. Collection policies must be created manually via the Purview portal Recommendations page (see docs/foundry-purview-integration.md §5.1).' -Level Warning
+    if (-not $newCommand -or -not $getCommand) {
+        Write-LabLog -Message 'New-FeatureConfiguration / Get-FeatureConfiguration cmdlets are not available in this Security & Compliance PowerShell session. Collection policies must be created manually via the Purview portal Recommendations page (see docs/foundry-purview-integration.md §5.1).' -Level Warning
         foreach ($policy in @($workload.policies)) {
             $manualRequired.Add([string]$policy.name)
         }
@@ -88,10 +88,37 @@ function Deploy-CollectionPolicies {
         }
         $scenarioJson = $scenarioConfig | ConvertTo-Json -Compress
 
-        if ($PSCmdlet.ShouldProcess($policyName, 'Create collection policy (Set-FeatureConfiguration)')) {
+        # Enterprise AI apps location shape required by New-FeatureConfiguration.
+        # See https://learn.microsoft.com/purview/developer/configurepurview#creating-dspm-for-ai-know-your-data-kyd-policies-using-powershell
+        $locationsArray = @(
+            [ordered]@{
+                Workload = 'Applications'
+                Location = 'All'
+                LocationDisplayName = ''
+                LocationSource = 'Entra'
+                LocationType = 'Group'
+                Inclusions = @(
+                    [ordered]@{
+                        Type     = 'Tenant'
+                        Identity = 'All'
+                        Name     = 'All'
+                    }
+                )
+            }
+        )
+        $locationsJson = ($locationsArray | ConvertTo-Json -Compress -Depth 5)
+        if (-not $locationsJson.StartsWith('[')) { $locationsJson = "[$locationsJson]" }
+
+        if ($PSCmdlet.ShouldProcess($policyName, 'Create collection policy (New-FeatureConfiguration)')) {
             try {
                 Invoke-LabRetry -MaxAttempts 3 -DelaySeconds 5 -OperationName "create collection policy '$policyName'" -ScriptBlock {
-                    Set-FeatureConfiguration -Identity $policyName -ScenarioConfig $scenarioJson -ErrorAction Stop | Out-Null
+                    New-FeatureConfiguration `
+                        -Name $policyName `
+                        -FeatureScenario KnowYourData `
+                        -Mode Enable `
+                        -ScenarioConfig $scenarioJson `
+                        -Locations $locationsJson `
+                        -ErrorAction Stop | Out-Null
                 }
                 Write-LabLog -Message "Created collection policy: $policyName" -Level Success
                 $createdPolicies.Add($policyName)

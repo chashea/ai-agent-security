@@ -303,7 +303,29 @@ function Get-LabDlpRuleOptionalParameters {
     if ($notificationEnabled) {
         $notifyParam = Get-LabSupportedParameterName -CommandInfo $CommandInfo -CandidateNames @('NotifyUser', 'UserNotificationEnabled')
         if ($notifyParam) {
-            $optionalParams[$notifyParam] = $true
+            if ($notifyParam -eq 'NotifyUser') {
+                # New-DlpComplianceRule -NotifyUser is a MultiValuedProperty that
+                # takes SMTP addresses or one of {Owner, LastModifier, SiteAdmin}.
+                # Passing $true triggers "InvalidSmtpAddressInNotifyUserAction".
+                # Default to SiteAdmin — closest analogue to "alert the admins
+                # who own the policy" for a lab scenario. Override from config
+                # via enforcement.userNotification.recipients (string or array).
+                $recipients = @('SiteAdmin')
+                if (($enforcement.PSObject.Properties.Name -contains 'userNotification') -and
+                    $null -ne $enforcement.userNotification -and
+                    ($enforcement.userNotification.PSObject.Properties.Name -contains 'recipients') -and
+                    $enforcement.userNotification.recipients) {
+                    $configRecipients = @($enforcement.userNotification.recipients | ForEach-Object { [string]$_ } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+                    if ($configRecipients.Count -gt 0) {
+                        $recipients = $configRecipients
+                    }
+                }
+                $optionalParams[$notifyParam] = $recipients
+            }
+            else {
+                # UserNotificationEnabled is a plain boolean switch.
+                $optionalParams[$notifyParam] = $true
+            }
         }
         $messageParam = Get-LabSupportedParameterName -CommandInfo $CommandInfo -CandidateNames @('NotifyUserMessage', 'UserNotificationText')
         if ($messageParam) {
