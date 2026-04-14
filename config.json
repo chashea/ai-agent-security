@@ -61,6 +61,21 @@
           "sales_competitive_analysis.md",
           "sales_pricing_guide.md",
           "sales_prospect_playbook.md"
+        ],
+        "Kusto-Analyst": [
+          "kql_cheat_sheet.md",
+          "kql_sentinel_hunting.md",
+          "kql_appinsights_patterns.md"
+        ],
+        "Entra-Specialist": [
+          "entra_rbac_model.md",
+          "entra_conditional_access_patterns.md",
+          "entra_app_registrations.md"
+        ],
+        "Defender-Analyst": [
+          "defender_incident_triage.md",
+          "defender_mitre_mapping.md",
+          "defender_sentinel_playbooks.md"
         ]
       },
       "evaluations": {
@@ -306,6 +321,141 @@
             },
             {
               "type": "a2a"
+            }
+          ]
+        },
+        {
+          "name": "Kusto-Analyst",
+          "description": "KQL query authoring for Log Analytics, Sentinel, and Application Insights",
+          "instructions": "You are a KQL (Kusto Query Language) authoring assistant. Help users write, debug, and optimize queries for Azure Log Analytics, Microsoft Sentinel, and Application Insights. Explain query patterns, join strategies, and time-series functions. Never fabricate table schemas \u2014 if you are unsure about a table's column layout, ask the user for the actual schema or tell them how to discover it with `getschema`.",
+          "model": "gpt-4o",
+          "tools": [
+            {
+              "type": "code_interpreter"
+            },
+            {
+              "type": "file_search"
+            },
+            {
+              "type": "azure_ai_search",
+              "indexName": "aisec-compliance-index"
+            },
+            {
+              "type": "azure_function",
+              "config": {
+                "name": "run_kql_query",
+                "description": "Execute a KQL query against a Log Analytics workspace and return the result set",
+                "parameters": {
+                  "type": "object",
+                  "properties": {
+                    "workspaceId": {
+                      "type": "string",
+                      "description": "Log Analytics workspace ID"
+                    },
+                    "query": {
+                      "type": "string",
+                      "description": "KQL query string"
+                    },
+                    "timespan": {
+                      "type": "string",
+                      "description": "ISO-8601 duration (e.g., PT1H)"
+                    }
+                  },
+                  "required": [
+                    "workspaceId",
+                    "query"
+                  ]
+                },
+                "queueEndpoint": "https://pvfoundrybotstorage.queue.core.windows.net",
+                "queueName": "kusto-tasks",
+                "outputQueueName": "kusto-results"
+              }
+            }
+          ]
+        },
+        {
+          "name": "Entra-Specialist",
+          "description": "Microsoft Entra ID identity, RBAC, Conditional Access, and app registration advisor",
+          "instructions": "You are a Microsoft Entra ID specialist. Help users design RBAC assignments, Conditional Access policies, app registration OAuth flows, and cross-tenant configurations. Always follow least-privilege principles \u2014 when asked for a role, prefer the most specific built-in role over Owner/Contributor, and only suggest custom roles when no built-in fits. Never fabricate role names, GUIDs, or scopes.",
+          "model": "gpt-4o",
+          "tools": [
+            {
+              "type": "code_interpreter"
+            },
+            {
+              "type": "file_search"
+            },
+            {
+              "type": "azure_ai_search",
+              "indexName": "aisec-compliance-index"
+            },
+            {
+              "type": "openapi",
+              "config": {
+                "name": "microsoft_graph",
+                "description": "Microsoft Graph API \u2014 identity, users, groups, role assignments, and Conditional Access",
+                "url": "https://graph.microsoft.com/v1.0",
+                "paths": {
+                  "/users/{id}": {
+                    "get": {
+                      "operationId": "getUser",
+                      "summary": "Get a user by object id or userPrincipalName",
+                      "parameters": [
+                        {
+                          "name": "id",
+                          "in": "path",
+                          "required": true,
+                          "schema": {
+                            "type": "string"
+                          }
+                        }
+                      ],
+                      "responses": {
+                        "200": {
+                          "description": "User object"
+                        }
+                      }
+                    }
+                  },
+                  "/roleManagement/directory/roleAssignments": {
+                    "get": {
+                      "operationId": "listDirectoryRoleAssignments",
+                      "summary": "List Entra directory role assignments",
+                      "responses": {
+                        "200": {
+                          "description": "Role assignment list"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        },
+        {
+          "name": "Defender-Analyst",
+          "description": "Microsoft Defender XDR and Sentinel incident triage and threat-hunting assistant",
+          "instructions": "You are a security analyst specializing in Microsoft Defender XDR, Defender for Cloud, and Microsoft Sentinel. Help triage incidents, map findings to MITRE ATT&CK tactics and techniques, recommend hunting queries, and suggest remediation steps. Prioritize responses by severity, always cite the specific detection source (product + rule name), and never speculate about the identity of a threat actor without telemetry evidence.",
+          "model": "gpt-4o",
+          "tools": [
+            {
+              "type": "code_interpreter"
+            },
+            {
+              "type": "file_search"
+            },
+            {
+              "type": "azure_ai_search",
+              "indexName": "aisec-compliance-index"
+            },
+            {
+              "type": "mcp",
+              "config": {
+                "serverLabel": "sentinel-mcp",
+                "serverUrl": "https://sentinel-mcp.contoso.com/mcp",
+                "requireApproval": "never"
+              }
             }
           ]
         }
