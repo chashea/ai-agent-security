@@ -683,15 +683,29 @@ function Deploy-DLP {
                     $baseRuleParams['ContentContainsSensitiveInformation'] = $sitArray
                 }
 
-                # Adaptive Protection: insider risk level condition
+                # Adaptive Protection: insider risk level condition.
+                # New-DlpComplianceRule takes SharedByIRMUserRisk as a MultiValuedProperty
+                # of well-known GUIDs (NOT friendly names). See
+                # https://learn.microsoft.com/powershell/module/exchangepowershell/new-dlpcompliancerule
                 if ($rule.PSObject.Properties['insiderRiskLevel'] -and -not [string]::IsNullOrWhiteSpace([string]$rule.insiderRiskLevel)) {
-                    $riskParam = Get-LabSupportedParameterName -CommandInfo $newRuleCommand -CandidateNames @('IncludeUserRiskLevels')
+                    $riskLevelGuids = @{
+                        'Elevated' = 'FCB9FA93-6269-4ACF-A756-832E79B36A2A'
+                        'Moderate' = '797C4446-5C73-484F-8E58-0CCA08D6DF6C'
+                        'Minor'    = '75A4318B-94A2-4323-BA42-2CA6DB29AAFE'
+                    }
+                    $riskParam = Get-LabSupportedParameterName -CommandInfo $newRuleCommand -CandidateNames @('SharedByIRMUserRisk')
                     if ($riskParam) {
-                        $baseRuleParams[$riskParam] = @([string]$rule.insiderRiskLevel)
-                        Write-LabLog -Message "Rule '$ruleName' scoped to insider risk level: $($rule.insiderRiskLevel)" -Level Info
+                        $riskLevel = [string]$rule.insiderRiskLevel
+                        if ($riskLevelGuids.ContainsKey($riskLevel)) {
+                            $baseRuleParams[$riskParam] = @($riskLevelGuids[$riskLevel])
+                            Write-LabLog -Message "Rule '$ruleName' scoped to insider risk level '$riskLevel' ($($riskLevelGuids[$riskLevel]))" -Level Info
+                        }
+                        else {
+                            Write-LabLog -Message "Rule '$ruleName' has unrecognized insiderRiskLevel '$riskLevel' — must be Minor, Moderate, or Elevated. Risk scoping skipped." -Level Warning
+                        }
                     }
                     else {
-                        Write-LabLog -Message "Rule '$ruleName' requested insider risk level '$($rule.insiderRiskLevel)' but IncludeUserRiskLevels parameter is unavailable. Risk scoping will be skipped." -Level Warning
+                        Write-LabLog -Message "Rule '$ruleName' requested insider risk level '$($rule.insiderRiskLevel)' but SharedByIRMUserRisk parameter is unavailable on this New-DlpComplianceRule build. Risk scoping skipped." -Level Warning
                     }
                 }
 
