@@ -94,14 +94,23 @@ class TestEnablePurviewGovernance:
 
 
 class TestCreateAgent:
+    @patch("foundry_agents.requests.post")
+    @patch("foundry_agents.requests.delete")
     @patch("foundry_agents.requests.get")
-    def test_agent_already_exists(self, mock_get):
+    def test_agent_already_exists(self, mock_get, mock_delete, mock_post):
         mock_get.return_value = MagicMock(status_code=200)
+        mock_delete.return_value = MagicMock(status_code=204)
+        mock_post.return_value = MagicMock(
+            status_code=201,
+            json=MagicMock(return_value={"id": "uuid-replaced", "name": "AISec-HR"}),
+        )
         result = create_agent(
             "https://endpoint", "token", "v1", "AISec-HR", "gpt-4o", "instructions"
         )
         assert result is not None
         assert result["name"] == "AISec-HR"
+        mock_delete.assert_called_once()
+        mock_post.assert_called_once()
 
     @patch("foundry_agents.requests.post")
     @patch("foundry_agents.requests.get")

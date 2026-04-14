@@ -99,16 +99,12 @@ class TestBuildToolDefinitions:
         assert len(configs) == 1
         assert configs[0]["project_connection_id"] == "conn-bing-777"
 
-    def test_bing_grounding_tool_builtin(self):
-        # No project connection — built-in Bing grounding should omit the field.
+    def test_bing_grounding_tool_skipped_when_no_connection(self):
+        # No project connection — bing_grounding is skipped (API requires
+        # project_connection_id; emitting an empty/missing value causes deploy
+        # failure). See CLAUDE.md "Bing grounding requires a project connection."
         result = build_tool_definitions([{"type": "bing_grounding"}])
-        assert len(result) == 1
-        tool = result[0]
-        assert tool["type"] == "bing_grounding"
-        configs = tool["bing_grounding"]["search_configurations"]
-        assert len(configs) == 1
-        assert "project_connection_id" not in configs[0]
-        assert configs[0]["market"] == "en-US"
+        assert result == []
 
     def test_function_tool(self):
         func_def = {
