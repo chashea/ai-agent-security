@@ -80,28 +80,30 @@ function Deploy-CollectionPolicies {
             continue
         }
 
+        # Enterprise AI apps collection policy shape. Exact literal from
+        # https://learn.microsoft.com/purview/developer/configurepurview#creating-dspm-for-ai-know-your-data-kyd-policies-using-powershell
+        # IsIngestionEnabled=true so prompts/responses actually land in
+        # Activity Explorer (lab demo needs this). The Location GUID
+        # `ee1680d0-702f-4090-b26c-c49091e86531` is the well-known
+        # Enterprise AI apps group identity — `All` is NOT accepted.
         $scenarioConfig = [ordered]@{
-            Activities          = @('UploadText', 'DownloadText')
-            EnforcementPlanes   = @('Entra')
-            SensitiveTypeIds    = @('All')
-            IsIngestionEnabled  = $false
+            Activities         = @('UploadText', 'DownloadText')
+            EnforcementPlanes  = @('Entra')
+            SensitiveTypeIds   = @('All')
+            IsIngestionEnabled = $true
         }
         $scenarioJson = $scenarioConfig | ConvertTo-Json -Compress
 
-        # Enterprise AI apps location shape required by New-FeatureConfiguration.
-        # See https://learn.microsoft.com/purview/developer/configurepurview#creating-dspm-for-ai-know-your-data-kyd-policies-using-powershell
         $locationsArray = @(
             [ordered]@{
-                Workload = 'Applications'
-                Location = 'All'
-                LocationDisplayName = ''
+                Workload       = 'Applications'
+                Location       = 'ee1680d0-702f-4090-b26c-c49091e86531'
                 LocationSource = 'Entra'
-                LocationType = 'Group'
-                Inclusions = @(
+                LocationType   = 'Group'
+                Inclusions     = @(
                     [ordered]@{
                         Type     = 'Tenant'
                         Identity = 'All'
-                        Name     = 'All'
                     }
                 )
             }
