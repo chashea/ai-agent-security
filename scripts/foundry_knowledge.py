@@ -117,7 +117,16 @@ def upload_file(
 
     files = {"file": (filename, file_bytes, "application/octet-stream")}
     data = {"purpose": "assistants"}
-    resp = _retry_request("POST", url, headers=headers, files=files, data=data)
+    try:
+        resp = _retry_request("POST", url, headers=headers, files=files, data=data)
+    except Exception as exc:
+        # Transient transport errors exhausted the retry budget. Return None
+        # so the caller treats this file as skipped rather than propagating
+        # to sys.exit(1). One flaky upload should not abort the whole
+        # knowledge-base step — other agents still deserve their vector
+        # stores.
+        log.warning("File upload exhausted retries for '%s': %s — skipping", filename, exc)
+        return None
 
     if resp.status_code < 400:
         file_id = resp.json().get("id", "")
@@ -141,18 +150,30 @@ def create_vector_store(
     """Create a vector store with the given files. Returns vector store ID or None."""
     url = f"{project_endpoint}/vector_stores?api-version={api_version}"
     body = {"name": name, "file_ids": file_ids}
-    resp = _retry_request("POST", url, json=body, headers=_data_headers(data_token))
+    try:
+        resp = _retry_request("POST", url, json=body, headers=_data_headers(data_token))
+    except Exception as exc:
+        log.warning("Vector store creation exhausted retries for '%s': %s — skipping", name, exc)
+        return None
 
     if resp.status_code < 400:
         vs = resp.json()
         vs_id = vs.get("id", "")
         log.info("Created vector store: %s -> %s", name, vs_id)
 
-        # Wait for vector store to be ready (files need indexing)
+        # Wait for vector store to be ready (files need indexing). Poll
+        # failures are non-fatal — return the vs_id after the retry budget
+        # so the caller can still wire the tool up; Foundry will finish
+        # indexing in the background and the agent will see the vectors
+        # when it actually queries file_search.
         status_url = f"{project_endpoint}/vector_stores/{vs_id}?api-version={api_version}"
         for attempt in range(30):
             time.sleep(2)
-            status_resp = _retry_request("GET", status_url, headers=_data_headers(data_token))
+            try:
+                status_resp = _retry_request("GET", status_url, headers=_data_headers(data_token))
+            except Exception as exc:
+                log.warning("Vector store status poll exhausted retries for '%s': %s — returning ID anyway", name, exc)
+                return vs_id
             if status_resp.status_code == 200:
                 status = status_resp.json().get("status", "")
                 if status == "completed":
