@@ -29,7 +29,7 @@ log = logging.getLogger(__name__)
 def _retry_request(
     method: str,
     url: str,
-    max_attempts: int = 6,
+    max_attempts: int = 10,
     base_delay: float = 3.0,
     **kwargs,
 ) -> requests.Response:
@@ -276,10 +276,22 @@ def build_tool_definitions(
             definitions.append({"type": "code_interpreter"})
 
         elif tool_type == "file_search":
-            spec: dict = {"type": "file_search"}
-            if vector_store_ids:
-                spec["vector_store_ids"] = vector_store_ids
-            definitions.append(spec)
+            # The preview API now REQUIRES vector_store_ids on file_search. If
+            # the knowledge base upload failed or was partial, vector_store_ids
+            # will be empty — skip the tool entirely rather than produce an
+            # invalid payload that fails the whole agent create (and, under
+            # our delete-then-create idempotency path, wipes the existing
+            # agent).
+            if not vector_store_ids:
+                log.warning(
+                    "file_search tool skipped: no vector_store_ids available "
+                    "(upstream knowledge-base upload may have failed)."
+                )
+                continue
+            definitions.append({
+                "type": "file_search",
+                "vector_store_ids": vector_store_ids,
+            })
 
         elif tool_type == "azure_ai_search":
             conn_id = ""

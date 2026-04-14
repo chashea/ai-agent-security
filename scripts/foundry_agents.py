@@ -51,7 +51,7 @@ def _data_headers(token: str) -> dict:
 def _retry_request(
     method: str,
     url: str,
-    max_attempts: int = 6,
+    max_attempts: int = 10,
     base_delay: float = 3.0,
     **kwargs,
 ) -> requests.Response:

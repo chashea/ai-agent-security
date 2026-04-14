@@ -30,7 +30,7 @@ log = logging.getLogger(__name__)
 def _retry_request(
     method: str,
     url: str,
-    max_attempts: int = 6,
+    max_attempts: int = 10,
     base_delay: float = 3.0,
     **kwargs,
 ) -> requests.Response:
@@ -99,15 +99,25 @@ def _data_headers(token: str) -> dict:
 def upload_file(
     project_endpoint: str, data_token: str, api_version: str, file_path: str
 ) -> str | None:
-    """Upload a file to the Foundry project. Returns file ID or None."""
+    """Upload a file to the Foundry project. Returns file ID or None.
+
+    Reads the file content into memory before the request so the retry
+    wrapper can re-send the same bytes on a transient SSL failure. The
+    previous implementation passed an open file handle inside a `with`
+    block, which worked on the first attempt but sent 0 bytes on every
+    retry because the stream was already at EOF — Foundry rejected with
+    HTTP 400 "File is empty." even though the file was non-empty on disk.
+    """
     url = f"{project_endpoint}/files?api-version={api_version}"
     headers = {"Authorization": f"Bearer {data_token}"}
 
     filename = os.path.basename(file_path)
     with open(file_path, "rb") as f:
-        files = {"file": (filename, f, "application/octet-stream")}
-        data = {"purpose": "assistants"}
-        resp = _retry_request("POST", url, headers=headers, files=files, data=data)
+        file_bytes = f.read()
+
+    files = {"file": (filename, file_bytes, "application/octet-stream")}
+    data = {"purpose": "assistants"}
+    resp = _retry_request("POST", url, headers=headers, files=files, data=data)
 
     if resp.status_code < 400:
         file_id = resp.json().get("id", "")
