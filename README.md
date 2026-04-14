@@ -78,22 +78,41 @@ capacity limits or project-RP issues.
 
 ### Publishing agents to Teams / Microsoft 365 Copilot
 
-The Teams catalog publish step (`Publish-TeamsApps`) requires an existing
-`Microsoft.Graph` context with the `AppCatalog.ReadWrite.All` scope. In
-`-FoundryOnly` mode the deploy does not connect Graph itself, so either:
+`Deploy.ps1` v0.8+ connects Microsoft Graph automatically in every mode
+(including `-FoundryOnly`) with the minimal `AppCatalog.ReadWrite.All`
+scope via device code. The Teams catalog publish (`Publish-TeamsApps`)
+pushes each `packages/foundry/*.zip` to the org app catalog using a
+deterministic `manifest.json` id (`MD5(prefix/shortName)` rendered as a
+GUID) and a monotonic `version` (`1.<mmdd>.<hhmmss>` UTC), so reruns
+update the existing tenant app rather than creating duplicates.
 
-- **Pre-connect Graph** then run the FoundryOnly deploy in the same session:
-  ```powershell
-  Connect-MgGraph -Scopes 'AppCatalog.ReadWrite.All' -TenantId <tenantId> -NoWelcome
-  ./Deploy.ps1 -ConfigPath config.json -FoundryOnly -TenantId <tenantId>
-  ```
-- **Or run a full deploy** (without `-FoundryOnly`) which connects Graph
-  as part of its auth step.
+**Publishing to the catalog is automated; deploying to users is not.**
+Getting the apps into a user's Teams sidebar requires either:
 
-Reruns are idempotent — the Teams manifest uses a deterministic `id`
-(MD5 of prefix + shortName) and a monotonic `version`
-(`1.<mmdd>.<hhmmss>` UTC), so subsequent deploys update the existing
-tenant app rather than creating duplicates.
+- Approving them in **M365 admin center → Integrated apps → Deploy**
+  (one click per app, assigns to user groups), OR
+- Adding them to a Teams app setup policy via the Teams admin center.
+
+The automated per-user install path (`POST /users/{id}/teamwork/installedApps`)
+returns 403 under MCAPS tenant policy even with the correct Graph scope
+granted. See [`docs/post-deploy-steps.md`](docs/post-deploy-steps.md#2-deploy-teams-apps-to-users)
+for the full click path and alternatives.
+
+### Post-deploy manual steps
+
+`Deploy.ps1` cannot handle every step — a handful of items require tenant
+admin approval, external resource provisioning, or MCAPS-policy exceptions.
+After every clean deploy, work through
+[`docs/post-deploy-steps.md`](docs/post-deploy-steps.md):
+
+1. Approve Agent 365 digital-worker submissions (M365 admin center)
+2. Deploy Teams apps to users (Integrated Apps)
+3. Enable Defender for Cloud "Data security for AI interactions"
+4. Populate SharePoint siteUrl if you want SharePoint grounding
+5. Provision a Grounding with Bing Search resource if you want Bing
+6. Create Purview DSPM-for-AI collection policies if Activity Explorer is empty
+7. Generate demo traffic (prompts hitting each agent)
+8. Pre-connect Graph to skip device-code prompts on rerun loops
 
 ## Quick start
 

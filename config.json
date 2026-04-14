@@ -206,7 +206,7 @@
       ],
       "botService": { "enabled": true },
       "agent365": {
-        "enabled": false,
+        "enabled": true,
         "appVersion": "1.0.0",
         "shortDescription": "AI Agent Security Lab digital worker",
         "fullDescription": "Foundry agent published to Microsoft Agent 365 as a digital worker. Requires Frontier preview enrollment and tenant admin approval in the Microsoft 365 admin center.",

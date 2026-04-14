@@ -181,6 +181,24 @@ Exceptions: `Prerequisites.psm1`, `Logging.psm1`, `Interactive.psm1`, and `Found
 - **Post-deploy evaluations**: Run automatically as Step 7 in Deploy-Foundry. Includes prompt optimization, custom evaluator creation (compliance_adherence), batch eval with synthetic data (quality + safety + agent evaluators), and continuous evaluation enablement (10% sampling).
 - **Logging**: All output goes through `Write-LabLog` (Level: Info/Warning/Error/Success) and `Write-LabStep` for visual sections. Transcripts auto-cleanup after 30 days.
 
+### Post-deploy manual steps
+
+A handful of things `Deploy.ps1` cannot automate (tenant admin approval,
+external resources, MCAPS policy gates). See
+[`docs/post-deploy-steps.md`](docs/post-deploy-steps.md) for the full
+checklist. Summary:
+
+1. Approve Agent 365 digital-worker submissions at
+   <https://admin.cloud.microsoft/?#/agents/all/requested>
+2. Deploy Teams apps to users via M365 admin center → Integrated apps →
+   Deploy (per-user install via Graph is 403'd by MCAPS policy)
+3. Enable Defender for Cloud "Data security for AI interactions" toggle
+4. Provision SharePoint / Bing Search resources and wire their IDs into
+   `config.json` → `workloads.foundry.connections`
+5. Generate demo traffic against the agents so Purview surfaces populate
+
+Run through the checklist after every clean deploy.
+
 ### Known Constraints & Tenant Requirements
 
 **MCAPS tenant policy exemption (required for Foundry).** The MCAPS
