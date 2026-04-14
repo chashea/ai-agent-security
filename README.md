@@ -1,34 +1,29 @@
 # ai-agent-security
 
-Secure AI agents deployed from Azure AI Foundry with Microsoft Purview, DLP, sensitivity labels, and identity controls.
+Secure AI agents deployed from Azure AI Foundry with sensitivity labels and adjacent identity controls.
 
 ![Validate PowerShell](https://github.com/chashea/ai-agent-security/actions/workflows/validate.yml/badge.svg)
 
 ## What it does
 
-Deploy AI agents from Azure AI Foundry and automatically wrap them with enterprise security controls:
+Deploy AI agents from Azure AI Foundry and automatically wrap them with:
 
-- **Sensitivity labels** — AI-Accessible, AI-Protected, AI-Restricted, Executives-Only
-- **DLP policies** — Block PII in AI prompts, block labeled content from agents, block shadow AI uploads
-- **Retention** — 1-year AI interaction retention
-- **eDiscovery** — AI governance investigation cases
-- **Communication compliance** — DSPM for AI agent interactions
-- **Insider risk** — Risky AI usage policies
-- **Conditional Access** — MFA and risk-based access policies for agent principals
+- **Sensitivity labels** — AI-Accessible, AI-Protected, AI-Restricted, Executives-Only, with AI Search enforcement via the index managed identity
 - **Agent identity** — Managed identity and auto-derived RBAC for agents
+- **Conditional Access** — MFA and risk-based access policies for agent principals (report-only)
 - **Defender for Cloud Apps** — Session monitoring, activity alerts, and OAuth app governance
 - **Defender for Cloud** — Security posture management for Foundry infrastructure
 
 ## Deployment modes
 
 ```powershell
-# Full deployment: Foundry agents + all Purview security controls
+# Full deployment: Foundry agents + labels + CA + MDCA
 ./Deploy.ps1 -ConfigPath config.json
 
-# Security-only: Purview controls without Foundry deployment
+# Labeling + identity only: skip Foundry
 ./Deploy.ps1 -ConfigPath config.json -SkipFoundry
 
-# Foundry-only: Deploy agents without Purview controls
+# Foundry only: skip labeling and adjacent identity workloads
 ./Deploy.ps1 -ConfigPath config.json -FoundryOnly
 
 # Dry run: validate config and show what would be deployed (no cloud connection)
@@ -40,7 +35,7 @@ Deploy AI agents from Azure AI Foundry and automatically wrap them with enterpri
 - PowerShell 7+
 - Python 3.12+ (for Foundry agent SDK script)
 - Azure Bicep CLI (`az bicep install`)
-- Microsoft 365 E5 or E5 Compliance add-on
+- Microsoft 365 E5 or E5 Compliance add-on (for sensitivity labels)
 - Azure subscription (required for Foundry deployment)
 - Required PowerShell modules:
   - `ExchangeOnlineManagement` >= 3.0
@@ -52,7 +47,7 @@ Deploy AI agents from Azure AI Foundry and automatically wrap them with enterpri
   - `azure-ai-projects` >= 2.0.0
   - `azure-identity` >= 1.15.0
   - `requests` >= 2.31.0
-- Required Entra roles: Compliance Administrator, User Administrator, eDiscovery Administrator
+- Required Entra roles: Compliance Administrator (for labels), User Administrator
 
 ### Tenant prerequisites (MCAPS-governed tenants)
 
@@ -78,7 +73,7 @@ capacity limits or project-RP issues.
 
 ### Publishing agents to Teams / Microsoft 365 Copilot
 
-`Deploy.ps1` v0.8+ connects Microsoft Graph automatically in every mode
+`Deploy.ps1` connects Microsoft Graph automatically in every mode
 (including `-FoundryOnly`) with the minimal `AppCatalog.ReadWrite.All`
 scope via device code. The Teams catalog publish (`Publish-TeamsApps`)
 pushes each `packages/foundry/*.zip` to the org app catalog using a
@@ -110,9 +105,6 @@ After every clean deploy, work through
 3. Enable Defender for Cloud "Data security for AI interactions"
 4. Populate SharePoint siteUrl if you want SharePoint grounding
 5. Provision a Grounding with Bing Search resource if you want Bing
-6. Create Purview DSPM-for-AI collection policies if Activity Explorer is empty
-7. Generate demo traffic (prompts hitting each agent)
-8. Pre-connect Graph to skip device-code prompts on rerun loops
 
 ## Quick start
 
@@ -141,26 +133,18 @@ cd ai-agent-security
 
 Each workload under `workloads` has an `enabled` boolean. Set to `false` to skip that workload entirely.
 
-## Security controls deployed
+## Workloads deployed
 
 | Workload | Description |
 |---|---|
 | `foundry` | Azure AI Foundry account, project, model deployment, and agent definitions |
 | `agentIdentity` | Managed identity and auto-derived RBAC assignments for agent principals |
 | `testUsers` | User and group provisioning for scoped policy assignment |
-| `sensitivityLabels` | Sensitivity label hierarchy with AI-tier sublabels and auto-label policies |
-| `dlp` | DLP policies covering AI prompts (EnterpriseAI), labeled content (CopilotExperiences), and endpoint shadow AI |
-| `retention` | Retention policy applied to AI interaction locations |
-| `eDiscovery` | eDiscovery cases with custodians, hold queries, and search queries for AI governance |
-| `communicationCompliance` | DSPM for AI — captures agent interactions for compliance review |
-| `insiderRisk` | Insider risk policies targeting risky AI usage patterns |
-| `conditionalAccess` | Conditional Access policies (MFA, risky sign-in block) for agent principals |
+| `sensitivityLabels` | Sensitivity label hierarchy with AI-tier sublabels, auto-label policies, and AI Search MI role grants |
+| `conditionalAccess` | Conditional Access policies (MFA, risky sign-in block) for agent principals — report-only |
 | `mdca` | Defender for Cloud Apps — session policies, activity alerts, OAuth app governance |
-| `auditConfig` | Unified audit log searches scoped to AI interaction and DLP events |
 
 ## Architecture
-
-Deployment order (dependency-driven):
 
 The Foundry workload uses a three-layer architecture:
 - **PowerShell + ARM REST** (`modules/FoundryInfra.psm1`) for Foundry account,
@@ -170,19 +154,15 @@ The Foundry workload uses a three-layer architecture:
   knowledge base / vector stores, and post-deploy evaluations
 - **Bicep** (`infra/`) for eval infrastructure, Bot Services, and Defender posture
 
+Deployment order (dependency-driven):
+
 ```
 1. Foundry          — agents + Defender for Cloud posture
 2. AgentIdentity    — managed identity RBAC (auto-derived from tools)
-3. TestUsers        — groups needed for policy scoping
-4. SensitivityLabels
-5. DLP
-6. Retention
-7. EDiscovery
-8. CommunicationCompliance
-9. InsiderRisk
-10. ConditionalAccess — MFA + risky sign-in block (report-only)
-11. MDCA             — session monitoring + activity alerts + app governance
-12. AuditConfig
+3. TestUsers        — groups used for label scoping
+4. SensitivityLabels — label hierarchy + auto-label policies + AI Search MI roles
+5. ConditionalAccess — MFA + risky sign-in block (report-only)
+6. MDCA              — session monitoring + activity alerts + app governance
 ```
 
 Removal runs the exact reverse order. A deployment manifest (`manifests/`) captures all created resource IDs and is used for precise teardown.

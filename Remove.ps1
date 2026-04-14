@@ -5,9 +5,10 @@
     Main teardown orchestrator for ai-agent-security.
 
 .DESCRIPTION
-    Removes Azure AI Foundry agents and Microsoft Purview security workloads in reverse
-    dependency order. Can use a deployment manifest for precise removal, or fall back to
-    config + prefix-based removal.
+    Removes Azure AI Foundry agents, sensitivity labels, and adjacent identity
+    workloads (Conditional Access, MDCA) in reverse dependency order. Can use a
+    deployment manifest for precise removal, or fall back to config + prefix-based
+    removal.
 
 .PARAMETER ConfigPath
     Path to the configuration JSON file. Defaults to config.json in the repo root.
@@ -20,7 +21,7 @@
     Skip removal of Foundry and AgentIdentity workloads.
 
 .PARAMETER FoundryOnly
-    Remove Foundry and AgentIdentity only. Skip removal of Purview security workloads.
+    Remove Foundry and AgentIdentity only. Skip removal of labeling and adjacent identity workloads.
 
 .PARAMETER SkipAuth
     Skip connecting to Exchange Online, Microsoft Graph, and Azure (for testing).
@@ -98,13 +99,13 @@ try {
     $resolvedCloud = Resolve-LabCloud -Cloud $Cloud -Config $Config
     Write-LabLog -Message "Lab: $($Config.labName) | Prefix: $($Config.prefix) | Domain: $($Config.domain) | Cloud: $resolvedCloud" -Level Info
     if ($SkipFoundry) {
-        Write-LabLog -Message 'Mode: Security only removal (-SkipFoundry).' -Level Info
+        Write-LabLog -Message 'Mode: Labeling + identity only removal (-SkipFoundry).' -Level Info
     }
     elseif ($FoundryOnly) {
         Write-LabLog -Message 'Mode: Foundry only removal (-FoundryOnly).' -Level Info
     }
     else {
-        Write-LabLog -Message 'Mode: Full removal (Foundry + Security).' -Level Info
+        Write-LabLog -Message 'Mode: Full removal (Foundry + labeling + identity).' -Level Info
     }
 
     # Load manifest if provided
@@ -168,22 +169,26 @@ try {
         }
 
         Write-LabStep -StepName 'Auth' -Description 'Connecting to cloud services'
-        $needsPurview = -not $FoundryOnly
+        # Exchange Online (IPPS session) required for sensitivity-label teardown cmdlets.
+        # Graph required for Conditional Access, MDCA, test users.
+        $needsExchange = -not $FoundryOnly
+        $needsGraph = -not $FoundryOnly -or $removeFoundry
         $azureSubscriptionId = if ($removeFoundry -and $Config.workloads.foundry.PSObject.Properties['subscriptionId']) {
             [string]$Config.workloads.foundry.subscriptionId
         }
         else { $null }
         Connect-LabServices -TenantId $TenantId `
-            -SkipExchange:(-not $needsPurview) `
-            -SkipGraph:(-not $needsPurview) `
+            -SkipExchange:(-not $needsExchange) `
+            -SkipGraph:(-not $needsGraph) `
             -ConnectAzure:$removeFoundry `
             -AzureSubscriptionId $azureSubscriptionId
         $services = [System.Collections.Generic.List[string]]::new()
-        if ($needsPurview) { $services.Add('Exchange Online'); $services.Add('Microsoft Graph') }
+        if ($needsExchange) { $services.Add('Exchange Online') }
+        if ($needsGraph) { $services.Add('Microsoft Graph') }
         if ($removeFoundry) { $services.Add('Azure') }
         Write-LabLog -Message "Connected to $($services -join ', ')." -Level Success
 
-        if ($needsPurview) {
+        if ($needsExchange) {
             $resolvedDomain = Resolve-LabTenantDomain -ConfiguredDomain $Config.domain
             if (-not [string]::Equals($resolvedDomain, [string]$Config.domain, [System.StringComparison]::OrdinalIgnoreCase)) {
                 Write-LabLog -Message "Configured domain '$($Config.domain)' is not verified in this tenant. Using '$resolvedDomain' for teardown lookups." -Level Warning
@@ -196,17 +201,8 @@ try {
     }
 
     # Remove workloads in reverse dependency order
-
-    # Security workloads first (reverse of deploy: AuditConfig, ConditionalAccess, InsiderRisk, CommCompliance, EDiscovery, Retention, DLP, SensitivityLabels, TestUsers)
+    # Reverse of deploy: MDCA, ConditionalAccess, SensitivityLabels, TestUsers
     if (-not $FoundryOnly) {
-
-        if ($Config.workloads.PSObject.Properties['auditConfig'] -and $Config.workloads.auditConfig.enabled) {
-            Write-LabStep -StepName 'AuditConfig' -Description 'Audit configuration removal'
-            Invoke-RemoveWorkload -Name 'AuditConfig' -ScriptBlock {
-                Remove-AuditConfig -Config $Config -Manifest (Get-WorkloadManifest -WorkloadName 'auditConfig') -WhatIf:$WhatIfPreference
-                Write-LabLog -Message 'AuditConfig removal complete.' -Level Success
-            }
-        }
 
         if ($Config.workloads.PSObject.Properties['mdca'] -and $Config.workloads.mdca.enabled) {
             Write-LabStep -StepName 'MDCA' -Description 'Removing Defender for Cloud Apps policies'
@@ -222,61 +218,6 @@ try {
                 Remove-ConditionalAccess -Config $Config -Manifest (Get-WorkloadManifest -WorkloadName 'conditionalAccess') -WhatIf:$WhatIfPreference
                 Write-LabLog -Message 'Conditional Access removal complete.' -Level Success
             }
-        }
-
-        if ($Config.workloads.PSObject.Properties['insiderRisk'] -and $Config.workloads.insiderRisk.enabled) {
-            Write-LabStep -StepName 'InsiderRisk' -Description 'Removing insider risk management policies'
-            Invoke-RemoveWorkload -Name 'InsiderRisk' -ScriptBlock {
-                Remove-InsiderRisk -Config $Config -Manifest (Get-WorkloadManifest -WorkloadName 'insiderRisk') -WhatIf:$WhatIfPreference
-                Write-LabLog -Message 'Insider Risk removal complete.' -Level Success
-            }
-        }
-        else {
-            Write-LabLog -Message 'insiderRisk workload is disabled, skipping.' -Level Info
-        }
-
-        if ($Config.workloads.PSObject.Properties['communicationCompliance'] -and $Config.workloads.communicationCompliance.enabled) {
-            Write-LabStep -StepName 'CommunicationCompliance' -Description 'Removing communication compliance policies'
-            Invoke-RemoveWorkload -Name 'CommunicationCompliance' -ScriptBlock {
-                Remove-CommunicationCompliance -Config $Config -Manifest (Get-WorkloadManifest -WorkloadName 'communicationCompliance') -WhatIf:$WhatIfPreference
-                Write-LabLog -Message 'Communication Compliance removal complete.' -Level Success
-            }
-        }
-        else {
-            Write-LabLog -Message 'communicationCompliance workload is disabled, skipping.' -Level Info
-        }
-
-        if ($Config.workloads.PSObject.Properties['retention'] -and $Config.workloads.retention.enabled) {
-            Write-LabStep -StepName 'Retention' -Description 'Removing retention policies and labels'
-            Invoke-RemoveWorkload -Name 'Retention' -ScriptBlock {
-                Remove-Retention -Config $Config -Manifest (Get-WorkloadManifest -WorkloadName 'retention') -WhatIf:$WhatIfPreference
-                Write-LabLog -Message 'Retention removal complete.' -Level Success
-            }
-        }
-        else {
-            Write-LabLog -Message 'retention workload is disabled, skipping.' -Level Info
-        }
-
-        if ($Config.workloads.PSObject.Properties['dlp'] -and $Config.workloads.dlp.enabled) {
-            Write-LabStep -StepName 'DLP' -Description 'Removing DLP policies'
-            Invoke-RemoveWorkload -Name 'DLP' -ScriptBlock {
-                Remove-DLP -Config $Config -Manifest (Get-WorkloadManifest -WorkloadName 'dlp') -WhatIf:$WhatIfPreference
-                Write-LabLog -Message 'DLP removal complete.' -Level Success
-            }
-        }
-        else {
-            Write-LabLog -Message 'dlp workload is disabled, skipping.' -Level Info
-        }
-
-        if ($Config.workloads.PSObject.Properties['collectionPolicies'] -and $Config.workloads.collectionPolicies.enabled) {
-            Write-LabStep -StepName 'CollectionPolicies' -Description 'Removing DSPM-for-AI collection policies'
-            Invoke-RemoveWorkload -Name 'CollectionPolicies' -ScriptBlock {
-                Remove-CollectionPolicies -Config $Config -Manifest (Get-WorkloadManifest -WorkloadName 'collectionPolicies') -WhatIf:$WhatIfPreference
-                Write-LabLog -Message 'Collection policies removal complete.' -Level Success
-            }
-        }
-        else {
-            Write-LabLog -Message 'collectionPolicies workload is disabled, skipping.' -Level Info
         }
 
         if ($Config.workloads.PSObject.Properties['sensitivityLabels'] -and $Config.workloads.sensitivityLabels.enabled) {
@@ -303,7 +244,7 @@ try {
 
     }
     else {
-        Write-LabLog -Message 'Security workload removal skipped (-FoundryOnly).' -Level Info
+        Write-LabLog -Message 'Labeling and identity workload removal skipped (-FoundryOnly).' -Level Info
     }
 
     # Foundry removed last — reverse of deploy order (Foundry deploys first)

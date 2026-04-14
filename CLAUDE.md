@@ -4,9 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Standalone AI agent security tool. Deploys Azure AI Foundry agents and wraps them with Microsoft Purview security controls (sensitivity labels, DLP, retention, eDiscovery, communication compliance, insider risk).
+Standalone AI agent security tool. Deploys Azure AI Foundry agents and wraps them with sensitivity labels (with AI Search enforcement), Conditional Access, and Defender for Cloud Apps controls.
 
-Single config file (`config.json`), modular by workload, deploy + teardown symmetry. Supports `-SkipFoundry` (Purview-only) and `-FoundryOnly` (Foundry-only) modes.
+Single config file (`config.json`), modular by workload, deploy + teardown symmetry. Supports `-SkipFoundry` (labeling/identity only) and `-FoundryOnly` (Foundry only) modes.
 
 ## Stack
 
@@ -29,7 +29,7 @@ Single config file (`config.json`), modular by workload, deploy + teardown symme
 # Full deploy
 ./Deploy.ps1 -ConfigPath config.json
 
-# Security-only (skip Foundry)
+# Labeling + identity only (skip Foundry)
 ./Deploy.ps1 -ConfigPath config.json -SkipFoundry
 
 # Foundry-only
@@ -137,20 +137,12 @@ Constraints section.
 
 1. Foundry — agents + Defender for Cloud posture
 2. AgentIdentity — managed identity RBAC (auto-derived from tools)
-3. TestUsers — groups needed for policy scoping
+3. TestUsers — groups used for label scoping
 4. SensitivityLabels (+ AI Search label-enforcement roles on the index MI)
-5. CollectionPolicies — DSPM-for-AI one-click collection policies (prerequisite for steps 6–9)
-6. DLP — Foundry rules scoped to an Entra-registered AI app (SIT-based block only)
-7. Retention — Enterprise AI apps location
-8. CommunicationCompliance
-9. InsiderRisk — Risky AI usage template
-10. ConditionalAccess — MFA + risky sign-in block (report-only). **Adjacent identity control, not Purview-for-Foundry.**
-11. MDCA — session monitoring + activity alerts + app governance. **Adjacent SaaS control, not Purview-for-Foundry.**
-12. AuditConfig
+5. ConditionalAccess — MFA + risky sign-in block (report-only)
+6. MDCA — session monitoring + activity alerts + app governance
 
 Removal is the exact reverse.
-
-**Foundry × Purview integration model:** see [`docs/foundry-purview-integration.md`](docs/foundry-purview-integration.md) for the authoritative mapping between `config.json` workload sections and Microsoft Learn sources, including the subscription-level Purview Data Security prerequisite, the user-security-context constraint, and per-capability shape (DLP app scope, retention location, eDiscovery ItemClass, AI Search label enforcement).
 
 ### Module Contract
 
@@ -163,19 +155,18 @@ Exceptions: `Prerequisites.psm1`, `Logging.psm1`, `Interactive.psm1`, and `Found
 ### Key Utility Functions (Prerequisites.psm1)
 
 - `Import-LabConfig` — JSON loader with required field validation (labName, prefix, domain)
-- `Test-LabConfigValidity` — validates enabled workloads have required subfields (e.g., dlp.policies, retention.policies)
+- `Test-LabConfigValidity` — validates enabled workloads have required subfields (e.g., sensitivityLabels.labels, conditionalAccess.policies)
 - `Invoke-LabRetry -ScriptBlock -MaxAttempts 3 -DelaySeconds 5` — generic retry for transient Graph/EXO failures
-- `Get-LabSupportedParameterName` — inspects cmdlet parameters to handle version differences (e.g., `ExchangeSenderMemberOf` vs `ExchangeSenderMemberOfGroups`)
+- `Get-LabSupportedParameterName` — inspects cmdlet parameters to handle version differences across module releases
 - `Connect-LabServices` / `Disconnect-LabServices` — multi-service auth (EXO, Graph, optional Azure)
 - `Resolve-LabTenantDomain` — verifies config domain against tenant; auto-corrects if mismatched
 - `Export-LabManifest` / `Import-LabManifest` — JSON serialization with `generatedAt` timestamp
 
 ### Key Patterns
 
-- **DLP preflight** (Deploy.ps1): Before DLP deployment, validates which cmdlet parameters are available. Degrades gracefully — falls back to baseline if label/override/alert params are unsupported.
-- **Parameter fallback**: Multiple modules use `Get-LabSupportedParameterName` to detect cmdlet capability at runtime, since parameter names vary across module versions (DLP locations, insider risk groups, etc.).
+- **Parameter fallback**: Modules use `Get-LabSupportedParameterName` to detect cmdlet capability at runtime, since parameter names vary across module versions.
 - **Post-deploy validation** (Deploy.ps1): Retries 6 times with 5-second delays to handle Microsoft Graph eventual consistency lag.
-- **Long-running operations**: EDiscovery polls async operation status (120s timeout, 5s interval). Foundry uses `Wait-ArmAsyncOperation` in FoundryInfra.psm1.
+- **Long-running operations**: Foundry uses `Wait-ArmAsyncOperation` in FoundryInfra.psm1.
 - **PowerShell-to-Python interface**: `Invoke-FoundryPython` helper writes JSON config to a temp file, invokes `python3.12 scripts/<script>.py --action <verb> --config <path>`, captures JSON manifest from stdout. Four Python scripts: `foundry_agents.py` (agent CRUD), `foundry_tools.py` (connections + tool definitions), `foundry_knowledge.py` (vector stores + doc upload), `foundry_evals.py` (evaluations pipeline). API versions are passed from PowerShell (single source of truth).
 - **Agent tools**: Each agent gets tools defined in `config.json` under `agents[].tools[]`. Tool definitions are built by `foundry_tools.py`, injecting runtime values (vector store IDs, connection IDs) from earlier deployment steps. Currently supports: code_interpreter, file_search, azure_ai_search, bing_grounding, openapi, azure_function, function, mcp, sharepoint_grounding, a2a, image_generation.
 - **Post-deploy evaluations**: Run automatically as Step 7 in Deploy-Foundry. Includes prompt optimization, custom evaluator creation (compliance_adherence), batch eval with synthetic data (quality + safety + agent evaluators), and continuous evaluation enablement (10% sampling).
@@ -195,7 +186,6 @@ checklist. Summary:
 3. Enable Defender for Cloud "Data security for AI interactions" toggle
 4. Provision SharePoint / Bing Search resources and wire their IDs into
    `config.json` → `workloads.foundry.connections`
-5. Generate demo traffic against the agents so Purview surfaces populate
 
 Run through the checklist after every clean deploy.
 
@@ -322,7 +312,6 @@ Single config at `config.json`. Required top-level: `labName`, `prefix`, `domain
 
 - Conditional Access policies deploy in **report-only mode** (not enforced)
 - MDCA session policies (CAAC) deploy in **report-only mode** via CA
-- AuditConfig removal is **non-destructive** — audit logging stays enabled on teardown
 - Defender for Cloud posture enables Standard pricing tiers (non-destructive on teardown)
 - All Deploy/Remove functions support `-WhatIf` via `$PSCmdlet.ShouldProcess()`
 

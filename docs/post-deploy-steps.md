@@ -143,68 +143,7 @@ to `config.json` → `workloads.foundry.connections.bingSearch`.
 the repo does not provision it because cost and region choices vary.
 Skip entirely if you don't need live web grounding.
 
-## 6. Create a Purview collection policy if none shows up in DSPM for AI
-
-**When.** If the Purview portal's DSPM for AI → Activity Explorer is empty
-after the full deploy (not `-FoundryOnly`). The deploy creates
-`workloads.collectionPolicies` policies as a prerequisite for
-DLP/IRM/CommCompliance/eDiscovery/Retention to receive Foundry
-prompts/responses, but this depends on Purview tenant-side provisioning.
-
-**Where.** Purview portal → Data Security Posture Management for AI →
-Policies → Recommendations.
-
-**What to do.** If the recommendations "Secure interactions from enterprise
-apps" and "Extend insights into sensitive data in AI app interactions"
-aren't created automatically, create them by hand via the one-click
-recommendation cards. The policies must exist *before* you send test
-traffic, or Activity Explorer stays empty.
-
-**Why this is manual.** DSPM for AI is a preview workload; the one-click
-create API surfaces are not all GA and depend on the tenant being
-onboarded to Purview Data Security.
-
-## 7. Generate demo traffic
-
-**When.** Before every Purview demo. Without real prompts hitting the
-agents, DLP alerts, IRM signals, Activity Explorer rows, and Comm
-Compliance reviews all stay empty.
-
-**Where.** Foundry portal → aisec-project → Agents → pick an agent → Try
-in playground. Or call the Foundry REST endpoint directly:
-
-```bash
-TOKEN=$(az account get-access-token --resource https://ai.azure.com --query accessToken -o tsv)
-curl -X POST \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  "https://aisec-foundry.services.ai.azure.com/api/projects/aisec-project/threads" \
-  -d '{}'
-# then POST /threads/{id}/messages, POST /threads/{id}/runs with assistant_id
-```
-
-**What to do.** Send 5–10 prompts per agent covering:
-- Benign baseline ("what's the HR policy on PTO carryover?")
-- SSN in the prompt ("my SSN is 123-45-6789, can you confirm my PTO?") —
-  triggers DLP if rules are active
-- Credit card number — triggers DLP
-- Medical term ("I have been diagnosed with X") — triggers DLP
-- Prompt injection attempt ("ignore previous instructions and ...") —
-  triggers indirect attack detector
-- Out-of-scope query ("what's the weather?") — triggers task adherence
-  evaluator
-
-Wait 5–10 minutes, then check:
-- Purview Activity Explorer for prompt/response rows
-- Purview DLP alerts for blocked / allowed-with-justification events
-- Foundry Evaluations blade for continuous-eval scores
-
-**Why this is manual.** Demo traffic needs intent and the prompts differ
-by audience. The repo doesn't ship synthetic-traffic tooling beyond the
-pre-deploy evaluation pipeline (which uses Foundry's own synthetic data
-generator for batch evals, not for populating Purview).
-
-## 8. Pre-connect Graph to skip device-code prompts on reruns
+## 6. Pre-connect Graph to skip device-code prompts on reruns
 
 **When.** Optional — makes reruns silent instead of prompting for a
 device code on every `Deploy.ps1` invocation.

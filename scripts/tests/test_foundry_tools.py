@@ -66,11 +66,9 @@ class TestBuildToolDefinitions:
         assert result[0]["type"] == "file_search"
         assert result[0]["vector_store_ids"] == ["vs-abc123", "vs-def456"]
 
-    def test_file_search_without_vector_stores(self):
+    def test_file_search_without_vector_stores_is_skipped(self):
         result = build_tool_definitions([{"type": "file_search"}])
-        assert len(result) == 1
-        assert result[0]["type"] == "file_search"
-        assert "vector_store_ids" not in result[0]
+        assert result == []
 
     def test_azure_ai_search_tool(self):
         connection_ids = {"aiSearch": {"id": "conn-search-999"}}

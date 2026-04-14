@@ -16,18 +16,18 @@
       "purviewDataSecurity": {
         "enable": true,
         "method": "defenderForCloud",
-        "notes": "Prerequisite for Purview to see Foundry prompts/responses. See docs/foundry-purview-integration.md §1. Toggle via Defender for Cloud ai-onboarding or Foundry portal compliance settings. Automatic enablement is out of scope for this repo; this block records the intent and is surfaced as a warning by Deploy-Foundry if the subscription has not been onboarded."
+        "notes": "Prerequisite for Purview to see Foundry prompts/responses. See docs/foundry-purview-integration.md \u00a71. Toggle via Defender for Cloud ai-onboarding or Foundry portal compliance settings. Automatic enablement is out of scope for this repo; this block records the intent and is surfaced as a warning by Deploy-Foundry if the subscription has not been onboarded."
       },
       "userSecurityContext": {
         "enabled": true,
-        "notes": "Purview Data Security Policies only enforce against Foundry calls that use an Entra user-context token or explicit userSecurityContext. See docs/foundry-purview-integration.md §3. Propagation through scripts/foundry_agents.py is out of scope for this repo; this flag records the intent."
+        "notes": "Purview Data Security Policies only enforce against Foundry calls that use an Entra user-context token or explicit userSecurityContext. See docs/foundry-purview-integration.md \u00a73. Propagation through scripts/foundry_agents.py is out of scope for this repo; this flag records the intent."
       },
       "purviewProcessContent": {
         "enabled": false,
         "failMode": "open",
         "enforceOnPrompt": true,
         "enforceOnResponse": true,
-        "notes": "Opt-in runtime bridge from the bot Function App to Microsoft Graph /dataSecurityAndGovernance/{processContent,protectionScopes/compute}. When enabled, each bot turn sends prompt (uploadText) and response (downloadText) into Purview — prompts/responses flow into Audit + DSPM Activity Explorer with classifications. Enforcement (DLP block) requires a user-context token (v0.7 follow-on via Bot Framework SSO); today's app-context MSI path is audit-only per docs/foundry-purview-integration.md §3. failMode=open means Graph errors fall through to the model; enforceOnPrompt/Response toggle short-circuiting when policy actions include restrictAccess."
+        "notes": "Opt-in runtime bridge from the bot Function App to Microsoft Graph /dataSecurityAndGovernance/{processContent,protectionScopes/compute}. When enabled, each bot turn sends prompt (uploadText) and response (downloadText) into Purview \u2014 prompts/responses flow into Audit + DSPM Activity Explorer with classifications. Enforcement (DLP block) requires a user-context token (v0.7 follow-on via Bot Framework SSO); today's app-context MSI path is audit-only per docs/foundry-purview-integration.md \u00a73. failMode=open means Graph errors fall through to the model; enforceOnPrompt/Response toggle short-circuiting when policy actions include restrictAccess."
       },
       "connections": {
         "aiSearch": {
@@ -42,16 +42,48 @@
         }
       },
       "knowledgeBase": {
-        "HR-Helpdesk": ["hr_employee_handbook.md", "hr_pto_policy.md", "hr_benefits_guide.md"],
-        "Finance-Analyst": ["finance_expense_policy.md", "finance_budget_guidelines.md", "finance_quarterly_template.md"],
-        "IT-Support": ["it_security_runbook.md", "it_access_request_guide.md", "it_incident_response.md"],
-        "Sales-Research": ["sales_competitive_analysis.md", "sales_pricing_guide.md", "sales_prospect_playbook.md"]
+        "HR-Helpdesk": [
+          "hr_employee_handbook.md",
+          "hr_pto_policy.md",
+          "hr_benefits_guide.md"
+        ],
+        "Finance-Analyst": [
+          "finance_expense_policy.md",
+          "finance_budget_guidelines.md",
+          "finance_quarterly_template.md"
+        ],
+        "IT-Support": [
+          "it_security_runbook.md",
+          "it_access_request_guide.md",
+          "it_incident_response.md"
+        ],
+        "Sales-Research": [
+          "sales_competitive_analysis.md",
+          "sales_pricing_guide.md",
+          "sales_prospect_playbook.md"
+        ]
       },
       "evaluations": {
         "batchEvaluators": {
-          "quality": ["coherence", "fluency", "relevance", "groundedness", "intent_resolution", "task_adherence"],
-          "safety": ["violence", "sexual", "self_harm", "hate_unfairness", "indirect_attack", "protected_material"],
-          "agent": ["tool_call_accuracy"]
+          "quality": [
+            "coherence",
+            "fluency",
+            "relevance",
+            "groundedness",
+            "intent_resolution",
+            "task_adherence"
+          ],
+          "safety": [
+            "violence",
+            "sexual",
+            "self_harm",
+            "hate_unfairness",
+            "indirect_attack",
+            "protected_material"
+          ],
+          "agent": [
+            "tool_call_accuracy"
+          ]
         },
         "syntheticDataGeneration": true,
         "syntheticSampleCount": 50,
@@ -79,9 +111,16 @@
           "instructions": "You are an HR helpdesk assistant for Contoso. Answer questions about HR policies, benefits, paid time off, and the employee handbook. Be helpful and professional. Do not share personnel records or personally identifiable information about specific employees.",
           "model": "gpt-4o",
           "tools": [
-            { "type": "code_interpreter" },
-            { "type": "file_search" },
-            { "type": "azure_ai_search", "indexName": "aisec-compliance-index" },
+            {
+              "type": "code_interpreter"
+            },
+            {
+              "type": "file_search"
+            },
+            {
+              "type": "azure_ai_search",
+              "indexName": "aisec-compliance-index"
+            },
             {
               "type": "function",
               "function": {
@@ -90,25 +129,41 @@
                 "parameters": {
                   "type": "object",
                   "properties": {
-                    "employee_id": { "type": "string", "description": "The employee's unique identifier" }
+                    "employee_id": {
+                      "type": "string",
+                      "description": "The employee's unique identifier"
+                    }
                   },
-                  "required": ["employee_id"]
+                  "required": [
+                    "employee_id"
+                  ]
                 }
               }
             },
-            { "type": "sharepoint_grounding" },
-            { "type": "a2a" }
+            {
+              "type": "sharepoint_grounding"
+            },
+            {
+              "type": "a2a"
+            }
           ]
         },
         {
           "name": "Finance-Analyst",
           "description": "Financial data analysis and reporting assistant",
-          "instructions": "You are a finance assistant for Contoso. Help analyze financial summaries, expense reports, and budget forecasts. Be accurate and thorough. Handle financial data with care — do not share account numbers, credit card data, or confidential financial reports with users who are not authorized to access them.",
+          "instructions": "You are a finance assistant for Contoso. Help analyze financial summaries, expense reports, and budget forecasts. Be accurate and thorough. Handle financial data with care \u2014 do not share account numbers, credit card data, or confidential financial reports with users who are not authorized to access them.",
           "model": "gpt-4o",
           "tools": [
-            { "type": "code_interpreter" },
-            { "type": "file_search" },
-            { "type": "azure_ai_search", "indexName": "aisec-compliance-index" },
+            {
+              "type": "code_interpreter"
+            },
+            {
+              "type": "file_search"
+            },
+            {
+              "type": "azure_ai_search",
+              "indexName": "aisec-compliance-index"
+            },
             {
               "type": "azure_function",
               "config": {
@@ -117,18 +172,30 @@
                 "parameters": {
                   "type": "object",
                   "properties": {
-                    "quarter": { "type": "string", "description": "Fiscal quarter (e.g., Q1, Q2)" },
-                    "department": { "type": "string", "description": "Department name" }
+                    "quarter": {
+                      "type": "string",
+                      "description": "Fiscal quarter (e.g., Q1, Q2)"
+                    },
+                    "department": {
+                      "type": "string",
+                      "description": "Department name"
+                    }
                   },
-                  "required": ["quarter"]
+                  "required": [
+                    "quarter"
+                  ]
                 },
                 "queueEndpoint": "https://pvfoundrybotstorage.queue.core.windows.net",
                 "queueName": "finance-tasks",
                 "outputQueueName": "finance-results"
               }
             },
-            { "type": "sharepoint_grounding" },
-            { "type": "a2a" }
+            {
+              "type": "sharepoint_grounding"
+            },
+            {
+              "type": "a2a"
+            }
           ]
         },
         {
@@ -137,9 +204,16 @@
           "instructions": "You are an IT support assistant for Contoso. Help employees with troubleshooting, software access requests, device issues, and general IT questions. Never ask for, reveal, or repeat credentials, API keys, admin passwords, or security tokens.",
           "model": "gpt-4o",
           "tools": [
-            { "type": "code_interpreter" },
-            { "type": "file_search" },
-            { "type": "azure_ai_search", "indexName": "aisec-compliance-index" },
+            {
+              "type": "code_interpreter"
+            },
+            {
+              "type": "file_search"
+            },
+            {
+              "type": "azure_ai_search",
+              "indexName": "aisec-compliance-index"
+            },
             {
               "type": "openapi",
               "config": {
@@ -152,9 +226,19 @@
                       "operationId": "listIncidents",
                       "summary": "List recent IT incidents",
                       "parameters": [
-                        { "name": "state", "in": "query", "schema": { "type": "string" } }
+                        {
+                          "name": "state",
+                          "in": "query",
+                          "schema": {
+                            "type": "string"
+                          }
+                        }
                       ],
-                      "responses": { "200": { "description": "List of incidents" } }
+                      "responses": {
+                        "200": {
+                          "description": "List of incidents"
+                        }
+                      }
                     },
                     "post": {
                       "operationId": "createIncident",
@@ -165,15 +249,25 @@
                             "schema": {
                               "type": "object",
                               "properties": {
-                                "short_description": { "type": "string" },
-                                "category": { "type": "string" },
-                                "urgency": { "type": "integer" }
+                                "short_description": {
+                                  "type": "string"
+                                },
+                                "category": {
+                                  "type": "string"
+                                },
+                                "urgency": {
+                                  "type": "integer"
+                                }
                               }
                             }
                           }
                         }
                       },
-                      "responses": { "201": { "description": "Incident created" } }
+                      "responses": {
+                        "201": {
+                          "description": "Incident created"
+                        }
+                      }
                     }
                   }
                 }
@@ -187,24 +281,38 @@
                 "requireApproval": "never"
               }
             },
-            { "type": "a2a" }
+            {
+              "type": "a2a"
+            }
           ]
         },
         {
           "name": "Sales-Research",
           "description": "Market research and competitive intelligence assistant",
-          "instructions": "You are a sales research assistant for Contoso. Help with market analysis, competitive intelligence, and customer prospect research. Handle customer data in accordance with company privacy policy — do not share personally identifiable information or confidential business strategy with external parties.",
+          "instructions": "You are a sales research assistant for Contoso. Help with market analysis, competitive intelligence, and customer prospect research. Handle customer data in accordance with company privacy policy \u2014 do not share personally identifiable information or confidential business strategy with external parties.",
           "model": "gpt-4o",
           "tools": [
-            { "type": "code_interpreter" },
-            { "type": "file_search" },
-            { "type": "bing_grounding" },
-            { "type": "image_generation" },
-            { "type": "a2a" }
+            {
+              "type": "code_interpreter"
+            },
+            {
+              "type": "file_search"
+            },
+            {
+              "type": "bing_grounding"
+            },
+            {
+              "type": "image_generation"
+            },
+            {
+              "type": "a2a"
+            }
           ]
         }
       ],
-      "botService": { "enabled": true },
+      "botService": {
+        "enabled": true
+      },
       "agent365": {
         "enabled": true,
         "appVersion": "1.0.0",
@@ -231,15 +339,21 @@
       "groups": [
         {
           "displayName": "AISec-Finance-Team",
-          "members": ["charlesshea"]
+          "members": [
+            "charlesshea"
+          ]
         },
         {
           "displayName": "AISec-IT-Team",
-          "members": ["charlesshea"]
+          "members": [
+            "charlesshea"
+          ]
         },
         {
           "displayName": "AISec-Sales-Team",
-          "members": ["charlesshea"]
+          "members": [
+            "charlesshea"
+          ]
         }
       ]
     },
@@ -253,16 +367,16 @@
           "sublabels": [
             {
               "name": "AI-Accessible",
-              "tooltip": "No encryption — content can be retrieved by Foundry RAG and AI indexing pipelines",
+              "tooltip": "No encryption \u2014 content can be retrieved by Foundry RAG and AI indexing pipelines",
               "encryption": false
             },
             {
               "name": "AI-Protected",
-              "tooltip": "Encrypted — user-context token required; retrievable by RAG only for authorized users",
+              "tooltip": "Encrypted \u2014 user-context token required; retrievable by RAG only for authorized users",
               "encryption": true,
               "contentMarking": {
                 "headerText": "CONFIDENTIAL - AI Protected",
-                "footerText": "Protected content — AI access requires user authorization"
+                "footerText": "Protected content \u2014 AI access requires user authorization"
               }
             }
           ]
@@ -274,7 +388,7 @@
           "sublabels": [
             {
               "name": "AI-Restricted",
-              "tooltip": "Encrypted — blocked from AI indexing and RAG retrieval; human review only",
+              "tooltip": "Encrypted \u2014 blocked from AI indexing and RAG retrieval; human review only",
               "encryption": true,
               "contentMarking": {
                 "headerText": "HIGHLY CONFIDENTIAL - AI Restricted",
@@ -283,7 +397,7 @@
             },
             {
               "name": "Executives-Only",
-              "tooltip": "Encrypted — restricted to executive group; not accessible via AI agents",
+              "tooltip": "Encrypted \u2014 restricted to executive group; not accessible via AI agents",
               "encryption": true,
               "contentMarking": {
                 "headerText": "HIGHLY CONFIDENTIAL - Executives Only",
@@ -297,229 +411,45 @@
         {
           "name": "Auto-label SSN as Confidential AI-Protected",
           "labelName": "Confidential\\AI-Protected",
-          "sensitiveInfoTypes": ["U.S. Social Security Number (SSN)"],
-          "locations": ["Exchange", "SharePoint"]
+          "sensitiveInfoTypes": [
+            "U.S. Social Security Number (SSN)"
+          ],
+          "locations": [
+            "Exchange",
+            "SharePoint"
+          ]
         }
       ],
       "aiSearchEnforcement": {
         "enabled": true,
         "indexName": "aisec-compliance-index",
-        "notes": "Honor sensitivity labels at RAG query time. Requires AI Search sensitivity-label indexing (public preview) on the index, plus Content.SuperUser + UnifiedPolicy.Tenant.Read on the AI Search system-assigned managed identity. See docs/foundry-purview-integration.md §5.5.",
+        "notes": "Honor sensitivity labels at RAG query time. Requires AI Search sensitivity-label indexing (public preview) on the index, plus Content.SuperUser + UnifiedPolicy.Tenant.Read on the AI Search system-assigned managed identity. See docs/foundry-purview-integration.md \u00a75.5.",
         "managedIdentityRoles": [
           "Content.SuperUser",
           "UnifiedPolicy.Tenant.Read"
         ]
       }
     },
-    "collectionPolicies": {
-      "enabled": true,
-      "notes": "DSPM-for-AI collection policies. Prerequisite for DLP, IRM, Communication Compliance, eDiscovery, and Retention to receive Foundry prompts/responses. See docs/foundry-purview-integration.md §5.1. Must deploy before those downstream workloads.",
-      "policies": [
-        {
-          "name": "DSPM for AI - Capture interactions for enterprise AI apps",
-          "recommendation": "Secure interactions from enterprise apps",
-          "appCategory": "EnterpriseAIApps",
-          "appFilter": "AzureAI"
-        },
-        {
-          "name": "DSPM for AI - Detect sensitive info shared with AI via network",
-          "recommendation": "Extend insights into sensitive data in AI app interactions",
-          "appCategory": "EnterpriseAIApps",
-          "appFilter": "AzureAI"
-        }
-      ]
-    },
-    "dlp": {
-      "enabled": true,
-      "simulationMode": false,
-      "notes": "Foundry-agent DLP must be authored via New-DlpComplianceRule scoped to a specific Entra-registered AI app. See docs/foundry-purview-integration.md §5.2. Only SIT-based block rules are supported today — label-based DLP against the Foundry app scope is not GA and has been removed from this config.",
-      "policies": [
-        {
-          "name": "AI Agent - PII Prompt Protection (Foundry Agents)",
-          "scope": "entraRegisteredAiApp",
-          "targetedEntraAppDisplayNames": [
-            "AISec-HR-Helpdesk-Bot",
-            "AISec-Finance-Analyst-Bot",
-            "AISec-IT-Support-Bot",
-            "AISec-Sales-Research-Bot"
-          ],
-          "targetedEntraAppId": null,
-          "rules": [
-            {
-              "name": "Block PII Prompts - Elevated Risk",
-              "sensitiveInfoTypes": [
-                "U.S. Social Security Number (SSN)",
-                "Credit Card Number",
-                "U.S. Bank Account Number",
-                "All Medical Terms And Conditions"
-              ],
-              "minCount": 1,
-              "insiderRiskLevel": "Elevated",
-              "enforcement": {
-                "action": "block",
-                "userNotification": {
-                  "enabled": true,
-                  "message": "Your prompt contains sensitive data and cannot be processed by this AI agent. Remove sensitive information and try again."
-                },
-                "alert": { "enabled": true, "severity": "high" },
-                "incidentReport": { "enabled": true, "severity": "high" }
-              }
-            },
-            {
-              "name": "Warn PII Prompts - Moderate Risk",
-              "sensitiveInfoTypes": [
-                "U.S. Social Security Number (SSN)",
-                "Credit Card Number",
-                "U.S. Bank Account Number",
-                "All Medical Terms And Conditions"
-              ],
-              "minCount": 1,
-              "insiderRiskLevel": "Moderate",
-              "enforcement": {
-                "action": "allowWithJustification",
-                "userNotification": {
-                  "enabled": true,
-                  "message": "Your prompt may contain sensitive data. Sharing sensitive information with AI agents may violate company policy."
-                },
-                "alert": { "enabled": true, "severity": "medium" },
-                "incidentReport": { "enabled": true, "severity": "medium" }
-              }
-            },
-            {
-              "name": "Audit PII Prompts - Minor Risk",
-              "sensitiveInfoTypes": [
-                "U.S. Social Security Number (SSN)",
-                "Credit Card Number",
-                "U.S. Bank Account Number",
-                "All Medical Terms And Conditions"
-              ],
-              "minCount": 1,
-              "insiderRiskLevel": "Minor",
-              "enforcement": {
-                "action": "auditOnly",
-                "alert": { "enabled": true, "severity": "low" }
-              }
-            }
-          ]
-        },
-        {
-          "name": "AI Agent - Endpoint Shadow AI Block",
-          "locations": ["Devices"],
-          "endpointDlpBrowserRestrictions": {
-            "blockedUrls": [
-              "chat.openai.com",
-              "chatgpt.com",
-              "claude.ai",
-              "gemini.google.com",
-              "copilot.microsoft.com",
-              "perplexity.ai",
-              "huggingface.co/chat"
-            ]
-          },
-          "rules": [
-            {
-              "name": "Endpoint Shadow AI Block - Elevated Risk",
-              "sensitiveInfoTypes": [
-                "U.S. Social Security Number (SSN)",
-                "Credit Card Number",
-                "U.S. Bank Account Number",
-                "All Medical Terms And Conditions"
-              ],
-              "minCount": 1,
-              "insiderRiskLevel": "Elevated",
-              "enforcement": {
-                "action": "block",
-                "userNotification": {
-                  "enabled": true,
-                  "message": "Uploading sensitive data to unauthorized AI tools is blocked by company policy."
-                },
-                "alert": { "enabled": true, "severity": "high" },
-                "incidentReport": { "enabled": true, "severity": "high" }
-              }
-            },
-            {
-              "name": "Endpoint Shadow AI Warn - Moderate Risk",
-              "sensitiveInfoTypes": [
-                "U.S. Social Security Number (SSN)",
-                "Credit Card Number",
-                "U.S. Bank Account Number",
-                "All Medical Terms And Conditions"
-              ],
-              "minCount": 1,
-              "insiderRiskLevel": "Moderate",
-              "enforcement": {
-                "action": "allowWithJustification",
-                "userNotification": {
-                  "enabled": true,
-                  "message": "You are about to share potentially sensitive data with an external AI tool. This may violate company policy."
-                },
-                "alert": { "enabled": true, "severity": "medium" }
-              }
-            },
-            {
-              "name": "Endpoint Shadow AI Audit - Minor Risk",
-              "sensitiveInfoTypes": [
-                "U.S. Social Security Number (SSN)",
-                "Credit Card Number",
-                "U.S. Bank Account Number",
-                "All Medical Terms And Conditions"
-              ],
-              "minCount": 1,
-              "insiderRiskLevel": "Minor",
-              "enforcement": {
-                "action": "auditOnly",
-                "alert": { "enabled": true, "severity": "low" }
-              }
-            }
-          ]
-        }
-      ]
-    },
-    "retention": {
-      "enabled": true,
-      "notes": "Foundry interactions are captured under the Enterprise AI apps retention location, not Exchange/OneDrive. See docs/foundry-purview-integration.md §5.3. Requires the collection policy from workloads.collectionPolicies to be in place first.",
-      "policies": [
-        {
-          "name": "AI Interaction Retention - 1 Year",
-          "retentionDays": 365,
-          "retentionAction": "retainAndDelete",
-          "locations": ["EnterpriseAI"]
-        }
-      ]
-    },
-    "communicationCompliance": {
-      "enabled": true,
-      "policies": [
-        {
-          "name": "AI Agent Interaction Monitoring",
-          "description": "DSPM for AI — captures all AI agent interactions for compliance review and Activity Explorer surfacing"
-        }
-      ]
-    },
-    "insiderRisk": {
-      "enabled": true,
-      "policies": [
-        {
-          "name": "AI Agent Risky Usage",
-          "template": "Risky AI usage",
-          "priorityUserGroups": ["AISec-Finance-Team", "AISec-Sales-Team"],
-          "indicators": ["AIRiskyUsage"]
-        }
-      ]
-    },
     "conditionalAccess": {
       "enabled": true,
-      "notes": "Adjacent identity control — NOT part of the Microsoft Foundry × Purview capability matrix. See docs/foundry-purview-integration.md §7. Deployed as a defense-in-depth layer around agent principals, not as a Purview-for-Foundry control.",
+      "notes": "Adjacent identity control \u2014 NOT part of the Microsoft Foundry \u00d7 Purview capability matrix. See docs/foundry-purview-integration.md \u00a77. Deployed as a defense-in-depth layer around agent principals, not as a Purview-for-Foundry control.",
       "policies": [
         {
           "name": "AI Agent MFA Required",
-          "targetAppIds": ["All"],
+          "targetAppIds": [
+            "All"
+          ],
           "action": "mfa"
         },
         {
           "name": "AI Agent Risky Sign-In Block",
-          "targetAppIds": ["All"],
-          "signInRiskLevels": ["high", "medium"],
+          "targetAppIds": [
+            "All"
+          ],
+          "signInRiskLevels": [
+            "high",
+            "medium"
+          ],
           "action": "block"
         }
       ]
@@ -527,7 +457,7 @@
     "mdca": {
       "enabled": true,
       "portalUrl": "",
-      "notes": "Adjacent SaaS control (Microsoft Defender for Cloud Apps) — NOT part of the Microsoft Foundry × Purview capability matrix. See docs/foundry-purview-integration.md §7.",
+      "notes": "Adjacent SaaS control (Microsoft Defender for Cloud Apps) \u2014 NOT part of the Microsoft Foundry \u00d7 Purview capability matrix. See docs/foundry-purview-integration.md \u00a77.",
       "policies": [
         {
           "name": "AI Agent Session Monitor",
@@ -558,19 +488,6 @@
           "type": "appGovernance",
           "description": "Tags agent service principals and monitors for anomalous OAuth behavior",
           "severity": "high"
-        }
-      ]
-    },
-    "auditConfig": {
-      "enabled": true,
-      "searches": [
-        {
-          "name": "AI Interaction Audit",
-          "operations": ["CopilotInteraction"]
-        },
-        {
-          "name": "DLP Violations in AI",
-          "operations": ["DlpRuleMatch", "DlpRuleUndo"]
         }
       ]
     }

@@ -522,28 +522,6 @@ function Get-LabObjectProperty {
     }
 }
 
-function Get-LabDlpConfiguredLabels {
-    [CmdletBinding()]
-    [OutputType([string[]])]
-    param(
-        [Parameter(Mandatory)]
-        [PSCustomObject]$Policy,
-
-        [Parameter(Mandatory)]
-        [PSCustomObject]$Rule
-    )
-
-    $labels = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
-    foreach ($label in (Get-LabStringArray -Value $Policy.labels)) {
-        $null = $labels.Add($label)
-    }
-    foreach ($label in (Get-LabStringArray -Value $Rule.labels)) {
-        $null = $labels.Add($label)
-    }
-
-    return [string[]]@($labels | Sort-Object -Unique)
-}
-
 function Invoke-LabRetry {
     [CmdletBinding()]
     [OutputType([object])]
@@ -594,15 +572,10 @@ function Test-LabConfigValidity {
     }
 
     $workloadRequirements = @{
-        'dlp'                       = @('policies')
         'sensitivityLabels'         = @('labels')
         'testUsers'                 = @('users')
-        'retention'                 = @('policies')
-        'communicationCompliance'   = @('policies')
-        'insiderRisk'               = @('policies')
         'conditionalAccess'         = @('policies')
         'mdca'                      = @('policies')
-        'collectionPolicies'        = @('policies')
     }
 
     foreach ($workloadName in $workloadRequirements.Keys) {
@@ -670,7 +643,6 @@ Export-ModuleMember -Function @(
     'Get-LabStringArray'
     'Get-LabSupportedParameterName'
     'Get-LabObjectProperty'
-    'Get-LabDlpConfiguredLabels'
     'Invoke-LabRetry'
     'Test-LabConfigValidity'
     'Test-LabManifestValidity'

@@ -13,10 +13,10 @@ Describe 'Test-LabConfigValidity' {
             prefix    = 'AISec'
             domain    = 'MngEnvMCAP648165.onmicrosoft.com'
             workloads = [PSCustomObject]@{
-                dlp = [PSCustomObject]@{
-                    enabled  = $true
-                    policies = @(
-                        [PSCustomObject]@{ name = 'AI Agent - PII Prompt Protection' }
+                sensitivityLabels = [PSCustomObject]@{
+                    enabled = $true
+                    labels  = @(
+                        [PSCustomObject]@{ name = 'Confidential' }
                     )
                 }
                 testUsers = [PSCustomObject]@{
@@ -36,7 +36,7 @@ Describe 'Test-LabConfigValidity' {
             prefix    = 'AISec'
             domain    = 'MngEnvMCAP648165.onmicrosoft.com'
             workloads = [PSCustomObject]@{
-                dlp = [PSCustomObject]@{
+                sensitivityLabels = [PSCustomObject]@{
                     enabled = $false
                 }
             }
@@ -50,7 +50,7 @@ Describe 'Test-LabConfigValidity' {
             prefix    = 'AISec'
             domain    = 'MngEnvMCAP648165.onmicrosoft.com'
             workloads = [PSCustomObject]@{
-                dlp = [PSCustomObject]@{
+                sensitivityLabels = [PSCustomObject]@{
                     enabled = $true
                 }
             }
