@@ -57,7 +57,7 @@ def optimize_prompt(
             "deploymentName": model_deployment,
         }
     }
-    resp = requests.post(url, json=body, headers=_data_headers(data_token))
+    resp = requests.post(url, json=body, headers=_data_headers(data_token), timeout=30)
     if resp.status_code < 400:
         result = resp.json()
         optimized = result.get("output", {}).get("optimizedMessage", instructions)
@@ -88,7 +88,7 @@ def create_custom_evaluator(
 
     # Check if exists
     check_url = f"{project_endpoint}/evaluators/{name}?api-version={api_version}"
-    check = requests.get(check_url, headers=_data_headers(data_token))
+    check = requests.get(check_url, headers=_data_headers(data_token), timeout=30)
     if check.status_code == 200:
         log.info("Custom evaluator already exists: %s", name)
         return {"name": name, "status": "exists"}
@@ -105,7 +105,7 @@ def create_custom_evaluator(
         "maxScore": evaluator_config.get("maxScore", 5),
     }
 
-    resp = requests.post(url, json=body, headers=_data_headers(data_token))
+    resp = requests.post(url, json=body, headers=_data_headers(data_token), timeout=30)
     if resp.status_code < 400:
         result = resp.json()
         log.info("Created custom evaluator: %s", name)
@@ -164,7 +164,7 @@ def run_batch_evaluation(
             "samplesCount": synthetic_count,
         }
 
-    resp = requests.post(url, json=body, headers=_data_headers(data_token))
+    resp = requests.post(url, json=body, headers=_data_headers(data_token), timeout=30)
     if resp.status_code < 400:
         eval_result = resp.json()
         eval_id = eval_result.get("id", "")
@@ -193,7 +193,7 @@ def _poll_evaluation(
     start = time.time()
 
     while time.time() - start < timeout:
-        resp = requests.get(url, headers=_data_headers(data_token))
+        resp = requests.get(url, headers=_data_headers(data_token), timeout=30)
         if resp.status_code != 200:
             time.sleep(10)
             continue
@@ -242,7 +242,7 @@ def enable_continuous_evaluation(
         "samplingRate": sampling_rate,
         "scenario": "standard",
     }
-    resp = requests.put(url, json=body, headers=_data_headers(data_token))
+    resp = requests.put(url, json=body, headers=_data_headers(data_token), timeout=30)
     if resp.status_code < 400:
         log.info("Continuous evaluation enabled for %s (%.0f%% sampling)", agent_name, sampling_rate * 100)
         return {"agentName": agent_name, "status": "enabled", "samplingRate": sampling_rate}

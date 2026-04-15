@@ -428,6 +428,37 @@ try {
         Write-LabLog -Message 'Skipping post-deploy validation for labeling/identity workloads (-FoundryOnly).' -Level Info
     }
 
+    if (-not $WhatIfPreference -and -not $SkipAuth -and -not $SkipFoundry -and
+        $manifest.ContainsKey('foundry') -and $manifest.foundry -and
+        $manifest.foundry.PSObject.Properties['projectEndpoint'] -and
+        $manifest.foundry.PSObject.Properties['agents']) {
+        Write-LabStep -StepName 'Foundry Validation' -Description 'Verifying deployed agents'
+        $endpoint = [string]$manifest.foundry.projectEndpoint
+        $agentApiVer = $Config.workloads.foundry.agentApiVersion
+        if (-not $agentApiVer) { $agentApiVer = '2025-05-15-preview' }
+        try {
+            $token = (Get-AzAccessToken -ResourceUrl 'https://ai.azure.com' -ErrorAction Stop).Token
+            $listUri = "$endpoint/agents?api-version=$agentApiVer"
+            $response = Invoke-RestMethod -Uri $listUri -Method GET -Headers @{ Authorization = "Bearer $token" } -ErrorAction Stop
+            $liveAgents = @($response.data)
+            $expected = @($manifest.foundry.agents)
+            $missing = @($expected | Where-Object {
+                $n = $_.name
+                -not ($liveAgents | Where-Object { $_.name -eq $n })
+            })
+            if ($missing.Count -gt 0) {
+                $names = ($missing | ForEach-Object { $_.name }) -join ', '
+                Write-LabLog -Message "Foundry agent validation: $($missing.Count) agent(s) not found via API: $names" -Level Warning
+            }
+            else {
+                Write-LabLog -Message "Foundry agent validation: all $($expected.Count) agent(s) confirmed." -Level Success
+            }
+        }
+        catch {
+            Write-LabLog -Message "Foundry agent validation skipped — could not query agents API: $_" -Level Warning
+        }
+    }
+
     # Summary
     $configuredWorkloads = @($Config.workloads.PSObject.Properties.Name)
     $disabledWorkloads = @(

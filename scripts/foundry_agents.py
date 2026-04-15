@@ -62,6 +62,7 @@ def _retry_request(
     intercept the calls. Non-retriable errors (4xx, auth, etc.) raise
     immediately so callers can branch on them.
     """
+    kwargs.setdefault("timeout", 30)
     method_func = getattr(requests, method.lower())
     last_exc: Exception | None = None
     for attempt in range(1, max_attempts + 1):

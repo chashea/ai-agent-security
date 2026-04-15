@@ -91,8 +91,15 @@ function Publish-FoundryAgentAsDigitalWorker {
     }
 
     try {
-        $resp = Invoke-WebRequest -Uri $uri -Method Post -Headers $headers -Body $bodyJson `
-                                  -SkipHttpErrorCheck -ErrorAction Stop
+        $resp = Invoke-LabRetry -ScriptBlock {
+            $r = Invoke-WebRequest -Uri $uri -Method Post -Headers $headers -Body $bodyJson `
+                                   -SkipHttpErrorCheck -ErrorAction Stop
+            $sc = [int]$r.StatusCode
+            if ($sc -eq 429 -or $sc -eq 503) {
+                throw "Transient HTTP $sc from Agent 365 publish for '$ApplicationName'"
+            }
+            $r
+        } -MaxAttempts 3 -DelaySeconds 10 -OperationName "Agent 365 publish ($ApplicationName)"
         $status = [int]$resp.StatusCode
 
         if ($status -ge 400) {
