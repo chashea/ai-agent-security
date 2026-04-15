@@ -42,6 +42,9 @@ function Invoke-FoundryPython {
 
     $scriptPath = Join-Path $PSScriptRoot '..' 'scripts' $ScriptName
     $inputFile  = [System.IO.Path]::GetTempFileName()
+    if (-not $IsWindows) {
+        chmod 600 $inputFile 2>$null
+    }
     $InputData  | ConvertTo-Json -Depth $JsonDepth | Set-Content -Path $inputFile -Encoding UTF8
 
     $pythonCmd = if (Get-Command 'python3.12' -ErrorAction SilentlyContinue) { 'python3.12' } else { 'python3' }

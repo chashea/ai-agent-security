@@ -348,6 +348,11 @@ function Import-LabConfig {
         [string]$ConfigPath
     )
 
+    $fileSize = (Get-Item $ConfigPath).Length
+    if ($fileSize -gt 1MB) {
+        throw "Config file '$ConfigPath' is $([math]::Round($fileSize / 1MB, 1)) MB — exceeds 1 MB limit."
+    }
+
     $raw = Get-Content -Path $ConfigPath -Raw
     $config = $raw | ConvertFrom-Json
 
@@ -602,6 +607,14 @@ function Test-LabConfigValidity {
                 $isValid = $false
             }
         }
+    }
+
+    $guidPattern = '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
+    $foundry = $Config.workloads.foundry
+    if ($foundry -and $foundry.PSObject.Properties['subscriptionId'] -and
+        $foundry.subscriptionId -and $foundry.subscriptionId -notmatch $guidPattern) {
+        Write-LabLog -Message "Foundry subscriptionId '$($foundry.subscriptionId)' is not a valid GUID." -Level Warning
+        $isValid = $false
     }
 
     return $isValid

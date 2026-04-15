@@ -221,7 +221,35 @@ function Publish-FoundryAgentsAsDigitalWorkers {
     return $results.ToArray()
 }
 
+function Deploy-Agent365 {
+    [CmdletBinding(SupportsShouldProcess)]
+    [OutputType([PSCustomObject])]
+    param(
+        [Parameter(Mandatory)] [PSCustomObject]$Config,
+        [Parameter(Mandatory)] [PSCustomObject]$FoundryManifest
+    )
+
+    $results = Publish-FoundryAgentsAsDigitalWorkers -Config $Config -FoundryManifest $FoundryManifest -WhatIf:$WhatIfPreference
+    return [PSCustomObject]@{ agent365 = @($results) }
+}
+
+function Remove-Agent365 {
+    [CmdletBinding(SupportsShouldProcess)]
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSReviewUnusedParameter', 'Manifest',
+        Justification = 'Module contract requires the parameter; no removal API exists.')]
+    param(
+        [Parameter(Mandatory)] [PSCustomObject]$Config,
+        [PSCustomObject]$Manifest
+    )
+
+    if ($PSCmdlet.ShouldProcess($Config.prefix, 'Remove Agent 365 digital workers')) {
+        Write-LabLog -Message 'Agent 365 digital worker removal is handled via the M365 admin center (no API available).' -Level Info
+    }
+}
+
 Export-ModuleMember -Function @(
     'Publish-FoundryAgentAsDigitalWorker',
-    'Publish-FoundryAgentsAsDigitalWorkers'
+    'Publish-FoundryAgentsAsDigitalWorkers',
+    'Deploy-Agent365',
+    'Remove-Agent365'
 )
