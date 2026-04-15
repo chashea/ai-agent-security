@@ -380,3 +380,62 @@ the "Please select the account" prompt.
 **Fix.** Run `az login` and/or `Connect-AzAccount` interactively in a
 separate session before kicking off `Deploy.ps1`. The deploy reuses the
 cached token via `Set-AzContext`.
+
+## Recovering from partial deployments
+
+`Deploy.ps1` has no rollback logic. If a workload fails mid-deploy,
+earlier workloads remain deployed and later ones are missing. The
+deployment order is:
+
+1. **Foundry** — agents + Defender posture
+2. **AgentIdentity** — RBAC
+3. **TestUsers** — groups
+4. **SensitivityLabels** — labels + auto-label policies
+5. **ConditionalAccess** — report-only
+6. **MDCA** — session policies
+
+### Identifying what was deployed
+
+Check the manifest in `manifests/` — it captures resource IDs for each
+workload that completed. If no manifest exists (deploy crashed before
+export), check each workload manually via the Azure portal or CLI.
+
+### Re-running specific workloads
+
+All Deploy functions are idempotent (they check existence before
+creating), so re-running is always safe.
+
+| Goal | Command |
+|------|---------|
+| Re-deploy only Foundry | `Deploy.ps1 -FoundryOnly` |
+| Re-deploy everything except Foundry | `Deploy.ps1 -SkipFoundry` |
+| Skip individual workloads | Set `workloads.<name>.enabled = false` in `config.json` for each workload to skip, then run `Deploy.ps1` |
+
+### When to use `Remove.ps1` vs. re-run
+
+- **Repair an existing deployment:** just re-run `Deploy.ps1`. Idempotent
+  functions skip resources that already exist and create anything missing.
+- **Start fresh:** `Remove.ps1 -ManifestPath <path>` to tear down, then
+  `Deploy.ps1` to rebuild.
+- **Prefix changed between runs:** old resources won't be found by prefix
+  lookup — use manifest-based removal (`Remove.ps1 -ManifestPath <path>`)
+  to clean up the old-prefix resources before re-deploying.
+
+### Common partial failure scenarios
+
+**Foundry fails.**
+No agents exist, but no other workloads are affected. Fix the Foundry
+config and re-run with `-FoundryOnly`.
+
+**SensitivityLabels fails.**
+Agents are deployed but unprotected by labeling policies. Fix the label
+config and re-run the full deploy — earlier workloads will no-op past
+existing resources.
+
+**MDCA fails.**
+Everything else is deployed. Re-run the full deploy; MDCA will skip
+existing resources and only create what's missing.
+
+**ConditionalAccess fails.**
+Agents, RBAC, groups, and labels are in place but CA policies are absent.
+Re-run the full deploy — ConditionalAccess picks up where it left off.

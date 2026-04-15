@@ -30,6 +30,17 @@ Deploy AI agents from Azure AI Foundry and automatically wrap them with:
 ./Deploy.ps1 -ConfigPath config.json -SkipAuth -WhatIf
 ```
 
+### Interactive mode
+
+`Deploy-Interactive.ps1` and `Remove-Interactive.ps1` provide guided prompts
+for deployment mode, cloud environment, and tenant selection. They wrap the
+standard scripts with no additional logic:
+
+```powershell
+./Deploy-Interactive.ps1          # prompted deploy
+./Remove-Interactive.ps1          # prompted teardown (includes manifest selection)
+```
+
 ## Prerequisites
 
 - PowerShell 7+
@@ -48,6 +59,13 @@ Deploy AI agents from Azure AI Foundry and automatically wrap them with:
   - `azure-identity` >= 1.15.0
   - `requests` >= 2.31.0
 - Required Entra roles: Compliance Administrator (for labels), User Administrator
+
+### Graph auth for managed identities
+
+The [`graph-auth/`](graph-auth/) directory contains standalone scripts for granting
+and testing Microsoft Graph permissions on Azure Managed Identities. Useful when
+agent workloads need Graph access from compute resources. See
+[`graph-auth/README.md`](graph-auth/README.md) for setup and permission details.
 
 ### Tenant prerequisites (MCAPS-governed tenants)
 
@@ -144,6 +162,23 @@ Each workload under `workloads` has an `enabled` boolean. Set to `false` to skip
 | `conditionalAccess` | Conditional Access policies (MFA, risky sign-in block) for agent principals — report-only |
 | `mdca` | Defender for Cloud Apps — session policies, activity alerts, OAuth app governance |
 
+## Agents
+
+The Foundry workload deploys 7 agents. Each agent's tools are auto-derived
+for RBAC assignment by the `agentIdentity` workload.
+
+| Agent | Tools |
+|---|---|
+| HR-Helpdesk | `code_interpreter`, `file_search`, `azure_ai_search`, `function`, `sharepoint_grounding`, `a2a`* |
+| Finance-Analyst | `code_interpreter`, `file_search`, `azure_ai_search`, `azure_function`, `sharepoint_grounding`, `a2a`* |
+| IT-Support | `code_interpreter`, `file_search`, `azure_ai_search`, `openapi`, `mcp`, `a2a`* |
+| Sales-Research | `code_interpreter`, `file_search`, `bing_grounding`, `image_generation`, `a2a`* |
+| Kusto-Analyst | `code_interpreter`, `file_search`, `azure_ai_search`, `azure_function` |
+| Entra-Specialist | `code_interpreter`, `file_search`, `azure_ai_search`, `openapi` |
+| Defender-Analyst | `code_interpreter`, `file_search`, `azure_ai_search`, `mcp` |
+
+\* `a2a` (agent-to-agent) is defined in config but temporarily disabled pending preview API availability.
+
 ## Architecture
 
 The Foundry workload uses a three-layer architecture:
@@ -165,7 +200,14 @@ Deployment order (dependency-driven):
 6. MDCA              — session monitoring + activity alerts + app governance
 ```
 
-Removal runs the exact reverse order. A deployment manifest (`manifests/`) captures all created resource IDs and is used for precise teardown.
+Removal runs the exact reverse order.
+
+### Deployment manifests
+
+Each successful deploy writes a manifest to `manifests/<prefix>_<timestamp>.json`
+containing all created resource IDs. `Remove.ps1 -ManifestPath` uses the manifest
+for precise, targeted teardown. Without a manifest, removal falls back to
+prefix-based resource lookup.
 
 ## Troubleshooting
 

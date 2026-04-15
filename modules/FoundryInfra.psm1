@@ -159,6 +159,10 @@ function Deploy-FoundryBicep {
     param(
         [Parameter(Mandatory)] [PSCustomObject]$Config
     )
+    <#
+    .SYNOPSIS
+        Creates the resource group, Foundry account, model deployments, and project via ARM REST, then deploys eval infra Bicep.
+    #>
 
     $fw             = $Config.workloads.foundry
     $subscriptionId = [string]$fw.subscriptionId
@@ -368,6 +372,10 @@ function Remove-FoundryBicep {
         [Parameter()] [PSCustomObject]$Manifest,
         [Parameter(Mandatory)] [string]$ArmToken
     )
+    <#
+    .SYNOPSIS
+        Removes the Foundry project, account, model deployment, and resource group.
+    #>
 
     $fw             = $Config.workloads.foundry
     $subscriptionId = if ($Manifest -and $Manifest.PSObject.Properties['subscriptionId']) { [string]$Manifest.subscriptionId } else { [string]$fw.subscriptionId }
@@ -524,6 +532,10 @@ function New-FoundryAgentPackage {
         [Parameter(Mandatory)] [string]$OutputDir,
         [Parameter(Mandatory)] [string]$TenantId
     )
+    <#
+    .SYNOPSIS
+        Generates a Teams declarative-agent zip package for an agent with a deterministic manifest ID.
+    #>
 
     $agentName   = [string]$Agent.name
     $shortName   = $agentName -replace "^$([regex]::Escape($Prefix))-", ''
@@ -967,6 +979,10 @@ function Deploy-BotServices {
         [Parameter(Mandatory)] [string]$SubscriptionId,
         [Parameter(Mandatory)] [string]$ResourceGroup
     )
+    <#
+    .SYNOPSIS
+        Deploys bot-services.bicep and bot-per-agent.bicep for each agent, including function app packaging and Graph permissions.
+    #>
 
     $prefix      = [string]$Config.prefix
     $location    = [string]$Config.workloads.foundry.location
@@ -1231,6 +1247,10 @@ function Remove-BotServices {
         [Parameter(Mandatory)] [string]$SubscriptionId,
         [Parameter(Mandatory)] [string]$ResourceGroup
     )
+    <#
+    .SYNOPSIS
+        Removes Bot Services resources including bot registrations, Teams channels, the function app, and the Entra app registration.
+    #>
 
     $graphToken = Get-FoundryGraphToken
     $rgPath     = "$($script:ArmBase)/subscriptions/$SubscriptionId/resourceGroups/$ResourceGroup"
@@ -1283,6 +1303,10 @@ function Publish-TeamsApps {
         [Parameter(Mandatory)] [PSCustomObject]$Config,
         [Parameter(Mandatory)] [PSCustomObject[]]$Agents
     )
+    <#
+    .SYNOPSIS
+        Publishes Teams declarative-agent packages to the organization app catalog using deterministic manifest IDs.
+    #>
 
     if (-not $PSCmdlet.ShouldProcess("Teams app catalog for '$($Config.prefix)'", 'Publish')) {
         return @()
@@ -1370,6 +1394,10 @@ function Remove-TeamsApps {
         [Parameter(Mandatory)] [PSCustomObject[]]$TeamsApps,
         [Parameter(Mandatory)] [string]$TenantId
     )
+    <#
+    .SYNOPSIS
+        Removes Teams apps from the organization app catalog.
+    #>
 
     if (-not $PSCmdlet.ShouldProcess("Teams app catalog", 'Remove apps')) { return }
 
