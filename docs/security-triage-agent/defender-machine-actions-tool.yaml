@@ -1,0 +1,289 @@
+openapi: 3.0.3
+info:
+  title: Microsoft Defender for Endpoint — Machine Actions
+  version: 1.0.0
+  description: >
+    WARNING: This tool spec is attached ONLY to the workflow agent with
+    human-in-the-loop approval gates. It MUST NOT be attached to the read-only
+    triage agent.
+
+
+    Provides machine response actions through Microsoft Defender for Endpoint
+    including network isolation, antivirus scanning, forensic package
+    collection, and application execution restriction. All actions are
+    auditable and produce MachineAction records for status tracking.
+servers:
+  - url: https://api.securitycenter.microsoft.com/api
+security:
+  - oauth2:
+      - https://api.securitycenter.microsoft.com/.default
+paths:
+  /machines/{machineId}/isolate:
+    post:
+      operationId: isolateMachine
+      summary: Isolate a machine from the network
+      description: >
+        Isolate a machine from the network to contain a threat. Selective
+        isolation (default) allows Teams, Outlook, and Skype traffic. Full
+        isolation blocks all network connections. Requires a comment for the
+        audit trail.
+      parameters:
+        - $ref: "#/components/parameters/MachineIdParam"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - Comment
+              properties:
+                Comment:
+                  type: string
+                  maxLength: 5000
+                  description: Audit comment explaining the reason for isolation.
+                IsolationType:
+                  type: string
+                  enum:
+                    - Full
+                    - Selective
+                  default: Selective
+                  description: >
+                    Full blocks all network connections. Selective allows
+                    Teams, Outlook, and Skype traffic.
+      responses:
+        "201":
+          description: Machine isolation initiated.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MachineAction"
+  /machines/{machineId}/unisolate:
+    post:
+      operationId: unisolateMachine
+      summary: Release machine from isolation
+      description: >
+        Remove network isolation from a previously isolated machine, restoring
+        normal connectivity. Requires a comment for the audit trail.
+      parameters:
+        - $ref: "#/components/parameters/MachineIdParam"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CommentRequest"
+      responses:
+        "201":
+          description: Machine unisolation initiated.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MachineAction"
+  /machines/{machineId}/runAntiVirusScan:
+    post:
+      operationId: runAntiVirusScan
+      summary: Trigger antivirus scan on a machine
+      description: >
+        Initiate an antivirus scan on the target machine. Quick scan checks
+        common malware locations. Full scan checks the entire filesystem.
+        Requires a comment for the audit trail.
+      parameters:
+        - $ref: "#/components/parameters/MachineIdParam"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - Comment
+                - ScanType
+              properties:
+                Comment:
+                  type: string
+                  maxLength: 5000
+                  description: Audit comment explaining the reason for the scan.
+                ScanType:
+                  type: string
+                  enum:
+                    - Quick
+                    - Full
+                  description: >
+                    Quick scans common malware locations. Full scans the
+                    entire filesystem.
+      responses:
+        "201":
+          description: Antivirus scan initiated.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MachineAction"
+  /machines/{machineId}/collectInvestigationPackage:
+    post:
+      operationId: collectInvestigationPackage
+      summary: Collect forensic investigation package
+      description: >
+        Collect a forensic investigation package from the machine. The package
+        includes process data, registry hives, network connections, and other
+        artifacts useful for incident investigation. Requires a comment for
+        the audit trail.
+      parameters:
+        - $ref: "#/components/parameters/MachineIdParam"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CommentRequest"
+      responses:
+        "201":
+          description: Investigation package collection initiated.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MachineAction"
+  /machines/{machineId}/restrictCodeExecution:
+    post:
+      operationId: restrictAppExecution
+      summary: Restrict application execution on a machine
+      description: >
+        Restrict the machine to only run Microsoft-signed executables. Prevents
+        potentially malicious code from running while investigation is
+        underway. Requires a comment for the audit trail.
+      parameters:
+        - $ref: "#/components/parameters/MachineIdParam"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CommentRequest"
+      responses:
+        "201":
+          description: Application execution restriction applied.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MachineAction"
+  /machines/{machineId}/unrestrictCodeExecution:
+    post:
+      operationId: unrestrictAppExecution
+      summary: Remove application execution restriction
+      description: >
+        Remove the application execution restriction from a machine, restoring
+        normal application execution. Requires a comment for the audit trail.
+      parameters:
+        - $ref: "#/components/parameters/MachineIdParam"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CommentRequest"
+      responses:
+        "201":
+          description: Application execution restriction removed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MachineAction"
+  /machineactions/{actionId}:
+    get:
+      operationId: getMachineActionStatus
+      summary: Check status of a machine action
+      description: >
+        Poll the status of a previously initiated machine action. Use this to
+        track whether an isolation, scan, or other response action has
+        completed, failed, or timed out.
+      parameters:
+        - name: actionId
+          in: path
+          required: true
+          description: The unique identifier (GUID) of the machine action.
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Current status of the machine action.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MachineAction"
+components:
+  parameters:
+    MachineIdParam:
+      name: machineId
+      in: path
+      required: true
+      description: The unique identifier of the target machine.
+      schema:
+        type: string
+  securitySchemes:
+    oauth2:
+      type: oauth2
+      flows:
+        clientCredentials:
+          tokenUrl: https://login.microsoftonline.com/{tenantId}/oauth2/v2.0/token
+          scopes:
+            https://api.securitycenter.microsoft.com/.default: Default scope for Defender for Endpoint
+  schemas:
+    CommentRequest:
+      type: object
+      required:
+        - Comment
+      properties:
+        Comment:
+          type: string
+          maxLength: 5000
+          description: Audit comment explaining the reason for this action.
+    MachineAction:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Unique identifier for this machine action.
+        type:
+          type: string
+          enum:
+            - Isolate
+            - Unisolate
+            - RunAntiVirusScan
+            - CollectInvestigationPackage
+            - RestrictCodeExecution
+            - UnrestrictCodeExecution
+        status:
+          type: string
+          enum:
+            - Pending
+            - InProgress
+            - Succeeded
+            - Failed
+            - TimeOut
+            - Cancelled
+        machineId:
+          type: string
+        createdBy:
+          type: string
+        creationDateTimeUtc:
+          type: string
+          format: date-time
+        lastUpdateDateTimeUtc:
+          type: string
+          format: date-time
+        requestor:
+          type: string
+        requestorComment:
+          type: string
+        cancellationRequestor:
+          type: string
+          nullable: true
+        cancellationComment:
+          type: string
+          nullable: true
+        errorHResult:
+          type: integer
+          nullable: true
+          description: HRESULT error code if the action failed.
