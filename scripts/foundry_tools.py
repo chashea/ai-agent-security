@@ -345,13 +345,32 @@ def build_tool_definitions(
                 "servers": [{"url": openapi_cfg.get("url", "")}],
                 "paths": openapi_cfg.get("paths", {}),
             }
+            auth_cfg = openapi_cfg.get("auth", {"type": "anonymous"})
+            if auth_cfg.get("type") == "managed_identity":
+                auth = {
+                    "type": "managed_identity",
+                    "security_scheme": {
+                        "type": auth_cfg.get("securitySchemeType", "oauth2"),
+                        "audience": auth_cfg.get("audience", ""),
+                    },
+                }
+            elif auth_cfg.get("type") == "connection":
+                auth = {
+                    "type": "connection",
+                    "security_scheme": {
+                        "type": auth_cfg.get("securitySchemeType", "oauth2"),
+                    },
+                    "connection_id": auth_cfg.get("connectionId", ""),
+                }
+            else:
+                auth = {"type": "anonymous"}
             definitions.append({
                 "type": "openapi",
                 "openapi": {
                     "name": openapi_cfg.get("name", "api"),
                     "description": openapi_cfg.get("description", ""),
                     "spec": spec_obj,
-                    "auth": {"type": "anonymous"},
+                    "auth": auth,
                 },
             })
 
