@@ -65,13 +65,13 @@ function Set-LabLabelPublication {
             $labelObject = Get-Label -Identity $labelIdentity -ErrorAction Stop
             if ($labelObject.Mode -eq 'PendingDeletion') { $labelObject = $null }
         }
-        catch { $null = $_ }
+        catch { Write-LabLog -Message "Failed to get label by identity '$labelIdentity': $_" -Level Warning }
 
         if (-not $labelObject) {
             try {
                 $labelObject = Get-Label -ErrorAction Stop | Where-Object { $_.DisplayName -eq $labelIdentity -and $_.Mode -ne 'PendingDeletion' } | Select-Object -First 1
             }
-            catch { $null = $_ }
+            catch { Write-LabLog -Message "Failed to get label by display name '$labelIdentity': $_" -Level Warning }
         }
 
         if (-not $labelObject) {
@@ -146,7 +146,7 @@ function Set-LabLabelPublication {
         $existingPolicy = Get-LabelPolicy -Identity $policyName -ErrorAction Stop
     }
     catch {
-        $null = $_
+        Write-LabLog -Message "Failed to retrieve label policy '$policyName': $_" -Level Warning
     }
 
     if ($existingPolicy) {
@@ -220,7 +220,7 @@ function Set-LabLabelPublication {
                     }
                 }
                 catch {
-                    $null = $_
+                    Write-LabLog -Message "Failed to check label group status for '$policyLabel' on policy '$policyName': $_" -Level Warning
                 }
             }
 
@@ -324,7 +324,7 @@ function Set-LabLabelPublication {
         $existingRule = Get-LabelPolicyRule -Identity $ruleName -ErrorAction Stop
     }
     catch {
-        $null = $_
+        Write-LabLog -Message "Failed to retrieve label policy rule '$ruleName': $_" -Level Warning
     }
 
     if (-not $existingRule) {
@@ -429,7 +429,7 @@ function Deploy-SensitivityLabels {
             }
         }
         catch {
-            $null = $_ # Label does not exist
+            Write-LabLog -Message "Failed to look up label '$parentName': $_" -Level Warning
         }
 
         if ($existingLabel) {
@@ -470,7 +470,7 @@ function Deploy-SensitivityLabels {
         try {
             $parentLabel = Get-Label -ErrorAction Stop | Where-Object { $_.DisplayName -eq $parentName -and $_.Mode -ne 'PendingDeletion' } | Select-Object -First 1
         }
-        catch { $null = $_ }
+        catch { Write-LabLog -Message "Failed to retrieve parent label '$parentName' for sublabel creation: $_" -Level Warning }
         if (-not $parentLabel) {
             Write-LabLog "Could not retrieve active parent label $parentName for sublabel creation" -Level Warning
             $null = $unavailableLabels.Add($parentName)

@@ -9,7 +9,7 @@
 
 function Deploy-ConditionalAccess {
     [CmdletBinding(SupportsShouldProcess)]
-    [OutputType([hashtable])]
+    [OutputType([PSCustomObject])]
     param(
         [Parameter(Mandatory)]
         [PSCustomObject]$Config
@@ -25,7 +25,7 @@ function Deploy-ConditionalAccess {
     if ($missingScopes.Count -gt 0) {
         Write-LabLog -Message "Conditional Access requires Graph scopes not in current token: $($missingScopes -join ', '). Disconnect and reconnect with: Connect-MgGraph -Scopes 'Policy.ReadWrite.ConditionalAccess','Policy.Read.All','Application.Read.All'" -Level Warning
         Write-LabLog -Message "Skipping all Conditional Access policies due to missing scopes." -Level Warning
-        return @{ policies = @() }
+        return [PSCustomObject]@{ policies = @() }
     }
 
     foreach ($policy in $Config.workloads.conditionalAccess.policies) {
@@ -107,7 +107,7 @@ function Deploy-ConditionalAccess {
         }
     }
 
-    return @{
+    return [PSCustomObject]@{
         policies = $createdPolicies.ToArray()
     }
 }

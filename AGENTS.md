@@ -4,17 +4,17 @@ AI agent guidance for working in this repository.
 
 ## Project Overview
 
-Standalone AI agent security tool. Deploys Azure AI Foundry agents and wraps them with Microsoft Purview security controls (sensitivity labels, DLP, retention, eDiscovery, communication compliance, insider risk), identity governance (managed identity RBAC, conditional access), and Microsoft Defender (MDCA session policies, Defender for Cloud posture).
+Standalone AI agent security tool. Deploys Azure AI Foundry agents and wraps them with sensitivity labels (with AI Search enforcement), identity governance (managed identity RBAC, conditional access), and Microsoft Defender controls (MDCA session policies, Defender for Cloud posture).
 
 Single config file (`config.json`), modular by workload, deploy + teardown symmetry.
 
 ## Stack
 
 - PowerShell 7+ (pwsh)
-- Python 3.12 (Foundry agent SDK — `azure-ai-projects>=2.0.0`, `azure-identity`, `requests`)
+- Python 3.12 (Foundry agent SDK — `azure-ai-projects>=2.0.0`, `azure-identity`, `azure-search-documents`, `requests`)
 - Bicep (ARM infrastructure in `infra/`)
 - ExchangeOnlineManagement >= 3.0
-- Microsoft.Graph SDK (Users, Groups, Authentication)
+- Microsoft.Graph SDK (Users, Groups, Authentication, AppCatalog)
 - Az.Accounts (for Foundry/Azure deployment)
 
 ## Commands
@@ -95,15 +95,9 @@ Workload failures are caught per-workload. The orchestrator collects failures an
 1. Foundry — agents + Defender for Cloud posture
 2. AgentIdentity — managed identity RBAC (auto-derived from tools)
 3. TestUsers — groups needed for policy scoping
-4. SensitivityLabels
-5. DLP
-6. Retention
-7. EDiscovery
-8. CommunicationCompliance
-9. InsiderRisk
-10. ConditionalAccess — MFA + risky sign-in block (report-only)
-11. MDCA — session monitoring + activity alerts + app governance
-12. AuditConfig
+4. SensitivityLabels — label hierarchy + auto-label policies + AI Search MI roles
+5. ConditionalAccess — MFA + risky sign-in block (report-only)
+6. MDCA — session monitoring + activity alerts + app governance
 
 Removal is the exact reverse order.
 

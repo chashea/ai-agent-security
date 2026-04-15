@@ -332,7 +332,7 @@ try {
         if (-not (Test-Path $manifestDir)) {
             New-Item -ItemType Directory -Path $manifestDir -Force | Out-Null
         }
-        $timestamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+        $timestamp = Get-Date -Format 'yyyyMMdd-HHmmssfff'
         $manifestPath = Join-Path $manifestDir "$($Config.prefix)_${timestamp}.json"
         Export-LabManifest -ManifestData ([PSCustomObject]$manifest) -OutputPath $manifestPath
         Write-LabLog -Message "Manifest exported to $manifestPath" -Level Success
