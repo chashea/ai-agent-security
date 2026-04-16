@@ -176,6 +176,63 @@ within ~120 seconds or it times out.
 v0.8+ via `Connect-LabServices -UseDeviceCode`; pre-connecting is purely
 a convenience for tight rerun loops.
 
+## 7. Fire adversarial traffic to light up detections
+
+**When.** After the Foundry workload is deployed and Defender / Purview
+are enabled (steps 3 + 5) and you want to *see* alerts surface in the
+Defender XDR incident queue, Prompt Shields logs, Purview DSPM for AI,
+and Foundry evaluators.
+
+**What it does.** `scripts/attack_agents.py` sends a curated catalog of
+hostile prompts — prompt injection, jailbreak, XPIA, PII harvest,
+credential fishing, harmful content, protected material, groundedness
+fabrication — to every agent in the most recent deployment manifest.
+Each call carries a `user_security_context` so the traffic is attributed
+to a named end user and application. Every prompt is tagged with the
+detection signal it is designed to trip.
+
+**Usage.**
+
+```bash
+# List the catalog (no network calls):
+python3.12 scripts/attack_agents.py --list
+
+# Dry-run (plan only) against the latest manifest:
+python3.12 scripts/attack_agents.py --dry-run
+
+# Fire the whole catalog at every agent and capture a JSON report:
+python3.12 scripts/attack_agents.py --output logs/attack_$(date +%Y%m%d-%H%M%S).json
+
+# Scope to one category and one agent:
+python3.12 scripts/attack_agents.py --category jailbreak --agent HR
+
+# Only high-severity attacks:
+python3.12 scripts/attack_agents.py --severity high critical
+```
+
+Each result row carries `attack_id`, `category`, `severity`,
+`expected_detection`, and a stable `outcome` label
+(`ok`, `blocked_content_filter`, `blocked_prompt_shield`,
+`blocked_jailbreak`, `blocked_other`, `error`, `network_error`) so you
+can correlate what the platform blocked versus what your own agents
+allowed through.
+
+**Where to check for the resulting alerts.**
+
+| Attack category | Expected signal surface |
+|---|---|
+| `prompt_injection` / `jailbreak` | Defender XDR alert `AI.PromptInjection` / `AI.Jailbreak`; Prompt Shields logs |
+| `indirect_injection` | Prompt Shields indirect-attack logs + Defender XDR |
+| `sensitive_data_exfil` / `credential_fishing` | Defender XDR `AI.SensitiveDataLeakage`; Purview DSPM for AI activity log |
+| `pii_harvest` | Purview Sensitive Information Types (SSN, CC, passport, PHI) |
+| `harmful_content` / `protected_material` | Azure AI Content Safety blocks; Responsible AI evaluator |
+| `groundedness_violation` | Foundry groundedness evaluator score drop |
+
+**Why this is opt-in.** The script generates real traffic and real
+alerts. Run it against lab/demo tenants, not production, unless you
+have cleared it with your SOC.
+
+
 ## Verification
 
 After working through the manual steps, confirm with:
