@@ -22,32 +22,9 @@ resource blocklist 'Microsoft.CognitiveServices/accounts/raiBlocklists@2024-10-0
   }
 }
 
-resource ssnPattern 'Microsoft.CognitiveServices/accounts/raiBlocklists/raiBlocklistItems@2024-10-01' = {
-  parent: blocklist
-  name: 'ssn-pattern'
-  properties: {
-    pattern: '\\b\\d{3}-\\d{2}-\\d{4}\\b'
-    isRegex: true
-  }
-}
-
-resource ccPattern 'Microsoft.CognitiveServices/accounts/raiBlocklists/raiBlocklistItems@2024-10-01' = {
-  parent: blocklist
-  name: 'credit-card-pattern'
-  properties: {
-    pattern: '\\b(?:4\\d{3}|5[1-5]\\d{2}|3[47]\\d{2}|6(?:011|5\\d{2}))[-\\s]?\\d{4}[-\\s]?\\d{4}[-\\s]?\\d{3,4}\\b'
-    isRegex: true
-  }
-}
-
-resource bankAccountPattern 'Microsoft.CognitiveServices/accounts/raiBlocklists/raiBlocklistItems@2024-10-01' = {
-  parent: blocklist
-  name: 'bank-account-keyword'
-  properties: {
-    pattern: 'my (bank|routing) (account|number) is'
-    isRegex: true
-  }
-}
+// Blocklist items are deployed via ARM REST in FoundryInfra.psm1 to avoid
+// ETag race conditions (IfMatchPreconditionFailed) that occur when Bicep
+// PUTs multiple items against the same parent blocklist in parallel.
 
 // ── RAI Policy ──────────────────────────────────────────────────────────────
 
@@ -72,11 +49,6 @@ var materialProtection = [
   { name: 'protected_material_code', source: 'Completion', blocking: true, enabled: true }
 ]
 
-var piiFilters = [
-  { name: 'pii', source: 'Prompt', blocking: false, enabled: true }
-  { name: 'pii', source: 'Completion', blocking: false, enabled: true }
-]
-
 var profanityFilter = [
   { name: 'profanity', source: 'Prompt', blocking: true, enabled: true }
 ]
@@ -87,7 +59,7 @@ resource raiPolicy 'Microsoft.CognitiveServices/accounts/raiPolicies@2024-10-01'
   properties: {
     basePolicyName: 'Microsoft.DefaultV2'
     mode: 'Blocking'
-    contentFilters: concat(coreFilters, promptProtection, materialProtection, piiFilters, profanityFilter)
+    contentFilters: concat(coreFilters, promptProtection, materialProtection, profanityFilter)
     customBlocklists: [
       { blocklistName: blocklistName, blocking: true, source: 'Prompt' }
       { blocklistName: blocklistName, blocking: true, source: 'Completion' }

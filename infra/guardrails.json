@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.39.26.7824",
-      "templateHash": "15426195520070979928"
+      "templateHash": "14652370722512146033"
     }
   },
   "parameters": {
@@ -112,20 +112,6 @@
         "enabled": true
       }
     ],
-    "piiFilters": [
-      {
-        "name": "pii",
-        "source": "Prompt",
-        "blocking": false,
-        "enabled": true
-      },
-      {
-        "name": "pii",
-        "source": "Completion",
-        "blocking": false,
-        "enabled": true
-      }
-    ],
     "profanityFilter": [
       {
         "name": "profanity",
@@ -145,49 +131,13 @@
       }
     },
     {
-      "type": "Microsoft.CognitiveServices/accounts/raiBlocklists/raiBlocklistItems",
-      "apiVersion": "2024-10-01",
-      "name": "[format('{0}/{1}/{2}', parameters('accountName'), parameters('blocklistName'), 'ssn-pattern')]",
-      "properties": {
-        "pattern": "\\b\\d{3}-\\d{2}-\\d{4}\\b",
-        "isRegex": true
-      },
-      "dependsOn": [
-        "[resourceId('Microsoft.CognitiveServices/accounts/raiBlocklists', parameters('accountName'), parameters('blocklistName'))]"
-      ]
-    },
-    {
-      "type": "Microsoft.CognitiveServices/accounts/raiBlocklists/raiBlocklistItems",
-      "apiVersion": "2024-10-01",
-      "name": "[format('{0}/{1}/{2}', parameters('accountName'), parameters('blocklistName'), 'credit-card-pattern')]",
-      "properties": {
-        "pattern": "\\b(?:4\\d{3}|5[1-5]\\d{2}|3[47]\\d{2}|6(?:011|5\\d{2}))[-\\s]?\\d{4}[-\\s]?\\d{4}[-\\s]?\\d{3,4}\\b",
-        "isRegex": true
-      },
-      "dependsOn": [
-        "[resourceId('Microsoft.CognitiveServices/accounts/raiBlocklists', parameters('accountName'), parameters('blocklistName'))]"
-      ]
-    },
-    {
-      "type": "Microsoft.CognitiveServices/accounts/raiBlocklists/raiBlocklistItems",
-      "apiVersion": "2024-10-01",
-      "name": "[format('{0}/{1}/{2}', parameters('accountName'), parameters('blocklistName'), 'bank-account-keyword')]",
-      "properties": {
-        "pattern": "my (bank|routing) (account|number) is",
-        "isRegex": true
-      },
-      "dependsOn": [
-        "[resourceId('Microsoft.CognitiveServices/accounts/raiBlocklists', parameters('accountName'), parameters('blocklistName'))]"
-      ]
-    },
-    {
       "type": "Microsoft.CognitiveServices/accounts/raiPolicies",
       "apiVersion": "2024-10-01",
       "name": "[format('{0}/{1}', parameters('accountName'), parameters('policyName'))]",
       "properties": {
         "basePolicyName": "Microsoft.DefaultV2",
         "mode": "Blocking",
-        "contentFilters": "[concat(variables('coreFilters'), variables('promptProtection'), variables('materialProtection'), variables('piiFilters'), variables('profanityFilter'))]",
+        "contentFilters": "[concat(variables('coreFilters'), variables('promptProtection'), variables('materialProtection'), variables('profanityFilter'))]",
         "customBlocklists": [
           {
             "blocklistName": "[parameters('blocklistName')]",
