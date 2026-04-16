@@ -14,6 +14,7 @@ Deploy AI agents from Azure AI Foundry and automatically wrap them with:
 - **Conditional Access** — MFA and risk-based access policies for agent principals (report-only)
 - **Defender for Cloud Apps** — Session monitoring, activity alerts, and OAuth app governance
 - **Defender for Cloud** — Security posture management for Foundry infrastructure
+- **AI Red Teaming** — Automated adversarial probing via Microsoft's AI Red Teaming Agent (PyRIT-backed), with attack strategies (jailbreak, encoding bypass, prompt injection, multi-turn escalation) and ASR scorecards
 
 ## Deployment modes
 
@@ -180,6 +181,48 @@ for RBAC assignment by the `agentIdentity` workload.
 
 \* `a2a` (agent-to-agent) is defined in config but temporarily disabled pending preview API availability.
 
+## AI Red Teaming
+
+The deployment pipeline includes an automated AI Red Teaming step (Step 8) that
+probes deployed agents for safety vulnerabilities using Microsoft's
+[AI Red Teaming Agent](https://learn.microsoft.com/en-us/azure/foundry/concepts/ai-red-teaming-agent)
+backed by [PyRIT](https://github.com/microsoft/PyRIT).
+
+### Modes
+
+| Mode | SDK | Scope | Region requirement |
+|---|---|---|---|
+| **Local** (`scan`) | `azure-ai-evaluation[redteam]` | Content/model risks: violence, hate, sexual, self-harm, protected material, code vulnerability, ungrounded attributes | Any region with a Foundry project |
+| **Cloud** (`cloud-scan`) | `azure-ai-projects` | Agentic risks: prohibited actions, sensitive data leakage, task adherence + taxonomy-driven probing | East US 2, France Central, Sweden Central, Switzerland West, North Central US |
+
+Cloud mode falls back to local if the project region is unsupported.
+
+### Attack strategies
+
+Configured in `config.json` under `workloads.foundry.redTeaming.attackStrategies`:
+
+| Complexity | Strategies |
+|---|---|
+| Easy | Base64, Flip, Morse, Jailbreak, AsciiArt, Leetspeak, ROT13, UnicodeConfusable, IndirectAttack |
+| Moderate | Tense |
+| Difficult | Crescendo, Multiturn |
+
+### Setup
+
+```bash
+# Install red teaming extras (optional — only needed for local scans)
+pip install -r scripts/requirements-redteam.txt
+```
+
+Set `workloads.foundry.redTeaming.enabled` to `true` in `config.json` (enabled
+by default). The pipeline runs automatically at the end of `Deploy.ps1`.
+
+### Key metric
+
+**Attack Success Rate (ASR)** — percentage of adversarial prompts that
+successfully elicit undesirable responses. Results are logged to the deployment
+manifest under `redTeaming.agentScans[].scorecard`.
+
 ## Architecture
 
 The Foundry workload uses a three-layer architecture:
@@ -187,7 +230,7 @@ The Foundry workload uses a three-layer architecture:
   model deployments, and project creation (direct ARM REST at
   `api-version=2026-01-15-preview`), plus Teams packaging and catalog publishing
 - **Python SDK** (`scripts/*.py`) for agent CRUD, project connections,
-  knowledge base / vector stores, and post-deploy evaluations
+  knowledge base / vector stores, post-deploy evaluations, and AI red teaming
 - **Bicep** (`infra/`) for eval infrastructure, Bot Services, and Defender posture
 
 Deployment order (dependency-driven):

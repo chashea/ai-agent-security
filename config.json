@@ -149,6 +149,41 @@
         },
         "promptOptimization": true
       },
+      "redTeaming": {
+        "enabled": true,
+        "mode": "local",
+        "riskCategories": [
+          "violence",
+          "hate_unfairness",
+          "sexual",
+          "self_harm",
+          "protected_material",
+          "code_vulnerability",
+          "ungrounded_attributes"
+        ],
+        "numObjectives": 5,
+        "attackStrategies": {
+          "easy": [
+            "Base64",
+            "Flip",
+            "Morse",
+            "Jailbreak"
+          ],
+          "moderate": [
+            "Tense"
+          ],
+          "difficult": [
+            "Crescendo",
+            "Multiturn"
+          ]
+        },
+        "agentRiskCategories": [
+          "prohibited_actions",
+          "sensitive_data_leakage",
+          "task_adherence"
+        ],
+        "numTurns": 5
+      },
       "agents": [
         {
           "name": "HR-Helpdesk",

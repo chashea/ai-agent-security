@@ -96,6 +96,11 @@ FoundryInfra.psm1               foundry_tools.py               foundry-eval-infr
                                  Prompt optimization,
                                  batch / continuous eval,
                                  custom evaluators
+                                foundry_redteam.py
+                                 AI Red Teaming Agent,
+                                 local + cloud scan,
+                                 PyRIT attack strategies,
+                                 ASR scorecards
 ```
 
 **Deployment flow:**
@@ -117,6 +122,11 @@ FoundryInfra.psm1               foundry_tools.py               foundry-eval-infr
 7. `foundry_evals.py evaluate` probes the evaluations endpoint; runs prompt
    optimization, custom evaluators, batch eval (quality+safety), and
    continuous eval if available.
+8. `foundry_redteam.py scan` (or `cloud-scan`) runs the AI Red Teaming Agent
+   against deployed agents. Local mode uses PyRIT-backed adversarial probing
+   with configurable attack strategies and risk categories. Cloud mode uses
+   Foundry's eval API with taxonomy-driven agentic risk testing (prohibited
+   actions, sensitive data leakage, task adherence). Outputs ASR scorecards.
 
 `Foundry.psm1` is a thin orchestrator that coordinates all three layers. The
 external contract (`Deploy-Foundry` / `Remove-Foundry`) is unchanged.
@@ -168,9 +178,10 @@ Exceptions: `Prerequisites.psm1`, `Logging.psm1`, `Interactive.psm1`, and `Found
 - **Parameter fallback**: Modules use `Get-LabSupportedParameterName` to detect cmdlet capability at runtime, since parameter names vary across module versions.
 - **Post-deploy validation** (Deploy.ps1): Retries 6 times with 5-second delays to handle Microsoft Graph eventual consistency lag.
 - **Long-running operations**: Foundry uses `Wait-ArmAsyncOperation` in FoundryInfra.psm1.
-- **PowerShell-to-Python interface**: `Invoke-FoundryPython` helper writes JSON config to a temp file, invokes `python3.12 scripts/<script>.py --action <verb> --config <path>`, captures JSON manifest from stdout. Four Python scripts: `foundry_agents.py` (agent CRUD), `foundry_tools.py` (connections + tool definitions), `foundry_knowledge.py` (vector stores + doc upload), `foundry_evals.py` (evaluations pipeline). API versions are passed from PowerShell (single source of truth).
+- **PowerShell-to-Python interface**: `Invoke-FoundryPython` helper writes JSON config to a temp file, invokes `python3.12 scripts/<script>.py --action <verb> --config <path>`, captures JSON manifest from stdout. Five Python scripts: `foundry_agents.py` (agent CRUD), `foundry_tools.py` (connections + tool definitions), `foundry_knowledge.py` (vector stores + doc upload), `foundry_evals.py` (evaluations pipeline), `foundry_redteam.py` (AI Red Teaming). API versions are passed from PowerShell (single source of truth).
 - **Agent tools**: Each agent gets tools defined in `config.json` under `agents[].tools[]`. Tool definitions are built by `foundry_tools.py`, injecting runtime values (vector store IDs, connection IDs) from earlier deployment steps. Currently supports: code_interpreter, file_search, azure_ai_search, bing_grounding, openapi, azure_function, function, mcp, sharepoint_grounding, a2a, image_generation.
 - **Post-deploy evaluations**: Run automatically as Step 7 in Deploy-Foundry. Includes prompt optimization, custom evaluator creation (compliance_adherence), batch eval with synthetic data (quality + safety + agent evaluators), and continuous evaluation enablement (10% sampling).
+- **AI Red Teaming**: Runs as Step 8 in Deploy-Foundry (after evaluations). Uses Microsoft's AI Red Teaming Agent (PyRIT-backed) to probe deployed agents for content safety risks, prompt injection, jailbreak, encoding bypasses, and more. Local mode sends adversarial prompts through transient Foundry threads (cleaned up after each probe). Cloud mode uses Foundry eval API with taxonomy-driven agentic risk testing. `azure-ai-evaluation[redteam]` is an optional dependency (separate `requirements-redteam.txt`). Cloud mode requires a supported region (East US 2, France Central, Sweden Central, Switzerland West, North Central US); falls back to local on unsupported regions.
 - **Logging**: All output goes through `Write-LabLog` (Level: Info/Warning/Error/Success) and `Write-LabStep` for visual sections. Transcripts auto-cleanup after 30 days.
 
 ### Post-deploy manual steps

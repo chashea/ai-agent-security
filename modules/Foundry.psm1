@@ -513,6 +513,39 @@ function Deploy-Foundry {
         catch { Write-LabLog -Message "Evaluation error: $($_.Exception.Message)" -Level Warning }
     }
 
+    # ── Step 8: AI Red Teaming ───────────────────────────────────────────────
+    if ($fw.PSObject.Properties['redTeaming'] -and $fw.redTeaming -and $fw.redTeaming.enabled -eq $true) {
+        $rtMode = if ($fw.redTeaming.PSObject.Properties['mode']) { [string]$fw.redTeaming.mode } else { 'local' }
+        $rtAction = if ($rtMode -eq 'cloud') { 'cloud-scan' } else { 'scan' }
+        Write-LabStep -StepName 'AI Red Teaming' -Description "Running AI Red Teaming Agent ($rtMode mode) against deployed agents"
+
+        $rtInput = [ordered]@{} + $pythonBase
+        $rtInput['agentApiVersion'] = $script:AgentApiVersion
+        $rtInput['modelDeploymentName'] = $modelDeployName
+        $rtInput['location'] = $fw.location
+        $rtInput['agents'] = @($manifest.agents | ForEach-Object {
+            [ordered]@{
+                id      = [string]$_.id
+                name    = [string]$_.name
+                version = [string]($_.PSObject.Properties['version'] ? $_.version : '1')
+            }
+        })
+
+        # Convert redTeaming config to hashtable
+        $rtCfg = @{}
+        foreach ($prop in $fw.redTeaming.PSObject.Properties) {
+            $rtCfg[$prop.Name] = $prop.Value
+        }
+        $rtInput['redTeaming'] = $rtCfg
+
+        try {
+            $rtResult = Invoke-FoundryPython -ScriptName 'foundry_redteam.py' -Action $rtAction -InputData $rtInput
+            $manifest | Add-Member -NotePropertyName 'redTeaming' -NotePropertyValue $rtResult -Force
+            Write-LabLog -Message 'AI Red Teaming complete.' -Level Success
+        }
+        catch { Write-LabLog -Message "Red Teaming error: $($_.Exception.Message)" -Level Warning }
+    }
+
     return $manifest
 }
 

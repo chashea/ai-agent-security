@@ -2,3 +2,5 @@ azure-ai-projects>=2.0.0
 azure-identity>=1.15.0
 azure-search-documents>=11.4.0
 requests>=2.31.0
+# Red teaming (optional — install separately for local red team scans):
+#   pip install -r requirements-redteam.txt
