@@ -275,10 +275,12 @@ Runs `ruff` on staged `scripts/**/*.py` and `PSScriptAnalyzer`
 staged `*.ps1` / `*.psm1` / `*.psd1`. Bypass only when explicitly
 instructed: `git commit --no-verify`.
 
-### Claude Code subagents
+### Subagents / skills
 
-Specialized agents live in `.claude/agents/` and auto-activate on
-matching triggers:
+The same four specialized agents are available to both Claude Code
+(`.claude/agents/*.md`) and GitHub Copilot CLI
+(`.github/copilot/skills/*/SKILL.md`). They auto-activate on matching
+triggers:
 
 - **`foundry-troubleshooter`** — maps deploy errors to `docs/troubleshooting.md` entries.
 - **`foundry-verifier`** — read-only check that deployed agent tool definitions match `config.json`.
