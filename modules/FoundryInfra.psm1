@@ -287,6 +287,40 @@ function Deploy-FoundryBicep {
         Write-LabLog -Message "Created embeddings deployment: $embeddingsModel" -Level Success
     }
 
+    # ── 3b. Guardrails (RAI Policy + Blocklist) ─────────────────────────────
+    $guardrailsResult = $null
+    $guardrailsCfg = if ($fw.PSObject.Properties['guardrails']) { $fw.guardrails } else { $null }
+    if ($guardrailsCfg -and [bool]$guardrailsCfg.enabled) {
+        $guardrailsBicep = Join-Path $PSScriptRoot '..' 'infra' 'guardrails.bicep'
+        if (Test-Path $guardrailsBicep) {
+            $policyName = if ($guardrailsCfg.PSObject.Properties['policyName']) { [string]$guardrailsCfg.policyName } else { "$prefix-strict" }
+            $blocklistN = if ($guardrailsCfg.PSObject.Properties['blocklistName']) { [string]$guardrailsCfg.blocklistName } else { "$prefix-sensitive-data" }
+            Write-LabLog -Message "Deploying guardrails: policy=$policyName, blocklist=$blocklistN" -Level Info
+            $guardrailsOutput = az deployment group create `
+                --resource-group $resourceGroup `
+                --template-file $guardrailsBicep `
+                --parameters accountName=$accountName policyName=$policyName modelDeploymentName=$modelDeploy blocklistName=$blocklistN `
+                --subscription $subscriptionId `
+                --output json 2>&1
+            if ($LASTEXITCODE -eq 0) {
+                Write-LabLog -Message "Guardrails deployed: policy=$policyName (severity=Low, mode=Blocking, PII=annotate)" -Level Success
+                $guardrailsResult = @{
+                    policyName    = $policyName
+                    blocklistName = $blocklistN
+                }
+            }
+            else {
+                Write-LabLog -Message "Guardrails deployment failed (non-fatal): $guardrailsOutput" -Level Warning
+            }
+        }
+        else {
+            Write-LabLog -Message "Guardrails Bicep template not found at $guardrailsBicep — skipping." -Level Warning
+        }
+    }
+    else {
+        Write-LabLog -Message 'Guardrails disabled or not configured — using Microsoft Default policy.' -Level Info
+    }
+
     # ── 4. Foundry Project ──────────────────────────────────────────────────
     Write-LabLog -Message "Ensuring Foundry project: $projectName" -Level Info
     $projectUri      = "$projectPath`?api-version=$($script:ArmApiVersion)"
@@ -359,6 +393,7 @@ function Deploy-FoundryBicep {
         accountName        = $accountName
         accountPrincipalId = $accountPrincipalId
         aiSearchEndpoint   = $aiSearchEndpoint
+        guardrails         = $guardrailsResult
     }
 
     Write-LabLog -Message "Foundry infrastructure complete: account=$accountName, project=$projectName" -Level Success

@@ -9,6 +9,7 @@ Secure AI agents deployed from Azure AI Foundry with sensitivity labels and adja
 Deploy AI agents from Azure AI Foundry and automatically wrap them with:
 
 - **Sensitivity labels** — AI-Accessible, AI-Protected, AI-Restricted, Executives-Only, with AI Search enforcement via the index managed identity
+- **Guardrails** — Custom RAI policy with tightened content filters (severity Low), jailbreak/indirect attack detection, PII annotation, and custom PII blocklists (SSN, credit card, bank account patterns)
 - **Agent identity** — Managed identity and auto-derived RBAC for agents
 - **Conditional Access** — MFA and risk-based access policies for agent principals (report-only)
 - **Defender for Cloud Apps** — Session monitoring, activity alerts, and OAuth app governance

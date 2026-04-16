@@ -73,6 +73,7 @@ az bicep build --file infra/foundry-eval-infra.bicep
 az bicep build --file infra/bot-services.bicep
 az bicep build --file infra/bot-per-agent.bicep
 az bicep build --file infra/defender-posture.bicep
+az bicep build --file infra/guardrails.bicep
 ```
 
 ## Architecture
