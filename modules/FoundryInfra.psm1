@@ -1570,6 +1570,100 @@ function Enable-FoundryPurviewDataSecurity {
     }
 }
 
+# ─── Grounding with Bing Search (Microsoft.Bing/accounts) ───────────────────
+
+<#
+.SYNOPSIS
+    Provisions a Grounding with Bing Search account for Foundry web grounding.
+.DESCRIPTION
+    The legacy Bing Search API is retired (aka.ms/BingAPIsRetirement).
+    Foundry's bing_grounding tool requires a Microsoft.Bing/accounts resource
+    of kind 'Bing.Grounding'. This helper PUTs the resource idempotently and
+    returns the resource ID for use as a Foundry project connection target.
+.NOTES
+    Skips when the resource already exists with the same SKU/kind.
+#>
+function Deploy-BingGroundingAccount {
+    [CmdletBinding(SupportsShouldProcess)]
+    [OutputType([hashtable])]
+    param(
+        [Parameter(Mandatory)] [string]$SubscriptionId,
+        [Parameter(Mandatory)] [string]$ResourceGroup,
+        [Parameter(Mandatory)] [string]$AccountName,
+        [Parameter()] [string]$Location = 'global',
+        [Parameter()] [string]$Sku = 'G1',
+        [Parameter()] [string]$ApiVersion = '2020-06-10'
+    )
+
+    $armToken = Get-FoundryArmToken
+    $resourceId = "/subscriptions/$SubscriptionId/resourceGroups/$ResourceGroup/providers/Microsoft.Bing/accounts/$AccountName"
+    $uri = "https://management.azure.com${resourceId}?api-version=$ApiVersion"
+
+    $existing = $null
+    try { $existing = Invoke-ArmGet -Uri $uri -Token $armToken -ErrorAction Stop } catch { $existing = $null }
+    if ($existing -and $existing.id) {
+        Write-LabLog -Message "Bing Grounding: account '$AccountName' already exists in RG '$ResourceGroup'." -Level Info
+        return @{
+            resourceId = [string]$existing.id
+            name       = [string]$AccountName
+            status     = 'existing'
+        }
+    }
+
+    if (-not $PSCmdlet.ShouldProcess("Microsoft.Bing/accounts/$AccountName", 'Provision Grounding with Bing Search account')) {
+        return @{ resourceId = $resourceId; name = $AccountName; status = 'whatif' }
+    }
+
+    $body = @{
+        location   = $Location
+        sku        = @{ name = $Sku }
+        kind       = 'Bing.Grounding'
+        properties = @{ statisticsEnabled = $false }
+    }
+
+    try {
+        Invoke-ArmPut -Uri $uri -Token $armToken -Body $body -ErrorAction Stop | Out-Null
+        Write-LabLog -Message "Bing Grounding: provisioned account '$AccountName' (SKU $Sku) in RG '$ResourceGroup'." -Level Success
+        return @{
+            resourceId = $resourceId
+            name       = $AccountName
+            status     = 'created'
+        }
+    }
+    catch {
+        Write-LabLog -Message "Bing Grounding: failed to provision account '$AccountName': $($_.Exception.Message)" -Level Warning
+        return @{
+            resourceId = $resourceId
+            name       = $AccountName
+            status     = 'failed'
+            error      = [string]$_.Exception.Message
+        }
+    }
+}
+
+function Remove-BingGroundingAccount {
+    [CmdletBinding(SupportsShouldProcess)]
+    param(
+        [Parameter(Mandatory)] [string]$SubscriptionId,
+        [Parameter(Mandatory)] [string]$ResourceGroup,
+        [Parameter(Mandatory)] [string]$AccountName,
+        [Parameter()] [string]$ApiVersion = '2020-06-10'
+    )
+
+    if (-not $PSCmdlet.ShouldProcess("Microsoft.Bing/accounts/$AccountName", 'Delete Grounding with Bing Search account')) { return }
+
+    $armToken = Get-FoundryArmToken
+    $resourceId = "/subscriptions/$SubscriptionId/resourceGroups/$ResourceGroup/providers/Microsoft.Bing/accounts/$AccountName"
+    $uri = "https://management.azure.com${resourceId}?api-version=$ApiVersion"
+    try {
+        Invoke-ArmDelete -Uri $uri -Token $armToken -ErrorAction Stop | Out-Null
+        Write-LabLog -Message "Bing Grounding: removed account '$AccountName'." -Level Success
+    }
+    catch {
+        Write-LabLog -Message "Bing Grounding: remove failed for '$AccountName': $($_.Exception.Message)" -Level Warning
+    }
+}
+
 Export-ModuleMember -Function @(
     'Get-FoundryArmToken'
     'Get-FoundryDataToken'
@@ -1589,4 +1683,6 @@ Export-ModuleMember -Function @(
     'Publish-TeamsApps'
     'Remove-TeamsApps'
     'Enable-FoundryPurviewDataSecurity'
+    'Deploy-BingGroundingAccount'
+    'Remove-BingGroundingAccount'
 )

@@ -234,7 +234,33 @@ function Deploy-Foundry {
             }
         }
         if ($fw.connections.PSObject.Properties['bingSearch']) {
-            $connInput['connections']['bingSearch'] = @{}
+            $bingCfg = $fw.connections.bingSearch
+            $bingPayload = @{}
+
+            # If user specified provision=true and no resourceId, create a
+            # Microsoft.Bing/accounts resource in the Foundry RG using the
+            # Foundry account's naming base.
+            $shouldProvision = $false
+            if ($bingCfg.PSObject.Properties['provision']) { $shouldProvision = [bool]$bingCfg.provision }
+            $existingResourceId = $null
+            if ($bingCfg.PSObject.Properties['resourceId']) { $existingResourceId = [string]$bingCfg.resourceId }
+
+            if ($shouldProvision -and [string]::IsNullOrWhiteSpace($existingResourceId)) {
+                $bingName = if ($bingCfg.PSObject.Properties['name'] -and -not [string]::IsNullOrWhiteSpace([string]$bingCfg.name)) {
+                    [string]$bingCfg.name
+                } else {
+                    "${accountName}-bing"
+                }
+                $bingSku = if ($bingCfg.PSObject.Properties['sku'] -and -not [string]::IsNullOrWhiteSpace([string]$bingCfg.sku)) { [string]$bingCfg.sku } else { 'G1' }
+                $bingResult = Deploy-BingGroundingAccount -SubscriptionId $subscriptionId -ResourceGroup $resourceGroup -AccountName $bingName -Sku $bingSku
+                if ($bingResult -and $bingResult.resourceId) {
+                    $existingResourceId = [string]$bingResult.resourceId
+                }
+            }
+
+            if ($existingResourceId) { $bingPayload['resourceId'] = $existingResourceId }
+            if ($bingCfg.PSObject.Properties['endpoint']) { $bingPayload['endpoint'] = [string]$bingCfg.endpoint }
+            $connInput['connections']['bingSearch'] = $bingPayload
         }
         if ($fw.connections.PSObject.Properties['blobStorage']) {
             $storageEndpoint = "https://pvfoundrybot$($subscriptionId.Replace('-','').Substring(24,8).ToLower()).blob.core.windows.net"
@@ -656,6 +682,21 @@ function Remove-Foundry {
 
     # ── 5. Remove ARM infrastructure via Bicep teardown ──────────────────────
     Remove-FoundryBicep -Config $Config -Manifest $Manifest -ArmToken $armToken
+
+    # ── 6. Remove Grounding with Bing Search account (if we provisioned it) ──
+    $bingCfg = $null
+    if ($fw.PSObject.Properties['connections'] -and $fw.connections -and $fw.connections.PSObject.Properties['bingSearch']) {
+        $bingCfg = $fw.connections.bingSearch
+    }
+    if ($bingCfg -and $bingCfg.PSObject.Properties['provision'] -and [bool]$bingCfg.provision) {
+        $bingName = if ($bingCfg.PSObject.Properties['name'] -and -not [string]::IsNullOrWhiteSpace([string]$bingCfg.name)) {
+            [string]$bingCfg.name
+        } else { "${accountName}-bing" }
+        try {
+            Remove-BingGroundingAccount -SubscriptionId $subscriptionId -ResourceGroup $resourceGroup -AccountName $bingName
+        }
+        catch { Write-LabLog -Message "Bing Grounding removal error: $($_.Exception.Message)" -Level Warning }
+    }
 }
 
 Export-ModuleMember -Function @(

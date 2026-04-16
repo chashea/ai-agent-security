@@ -742,7 +742,8 @@
     "agentIdentity": {
       "enabled": true,
       "autoDerive": true,
-      "additionalRoles": []
+      "additionalRoles": [],
+      "graphPermissions": []
     },
     "testUsers": {
       "enabled": true,

@@ -297,3 +297,81 @@ class TestBuildTools:
         result = build_tools(config)
         assert "NoTools" not in result["toolDefinitions"]
         assert "WithTools" in result["toolDefinitions"]
+
+
+class TestA2aTool:
+    """a2a_preview: default skipped, opt-in via experimentalA2A flag."""
+
+    def test_a2a_skipped_by_default(self, caplog):
+        defs = build_tool_definitions(
+            agent_tools=[{"type": "a2a"}],
+            agents_manifest=[{"name": "Peer1", "baseUrl": "https://peer1"}],
+        )
+        assert defs == []
+        assert any("a2a tool skipped" in r.message for r in caplog.records)
+
+    def test_a2a_experimental_emits_payload(self, caplog):
+        defs = build_tool_definitions(
+            agent_tools=[{"type": "a2a", "experimental": True}],
+            agents_manifest=[
+                {"name": "Peer1", "baseUrl": "https://peer1"},
+                {"name": "Peer2", "baseUrl": "https://peer2"},
+            ],
+        )
+        assert len(defs) == 1
+        tool = defs[0]
+        assert tool["type"] == "a2a_preview"
+        assert "_experimental" not in tool  # marker not on the wire
+        agents = tool["a2a_preview"]["agents"]
+        assert {a["name"] for a in agents} == {"Peer1", "Peer2"}
+        assert all(a["base_url"].startswith("https://") for a in agents)
+        assert any("EXPERIMENTAL" in r.message for r in caplog.records)
+
+    def test_a2a_experimental_skipped_when_no_peers(self, caplog):
+        defs = build_tool_definitions(
+            agent_tools=[{"type": "a2a", "experimental": True}],
+            agents_manifest=[],
+        )
+        assert defs == []
+        assert any("no peers available" in r.message for r in caplog.records)
+
+    def test_a2a_flag_propagated_by_build_tools(self):
+        config = {
+            "projectEndpoint": "https://endpoint",
+            "experimentalA2A": True,
+            "agentsManifest": [
+                {"name": "A", "baseUrl": "https://a"},
+                {"name": "B", "baseUrl": "https://b"},
+            ],
+            "agents": [
+                {"name": "A", "tools": [{"type": "a2a"}]},
+                {"name": "B", "tools": [{"type": "a2a"}]},
+            ],
+        }
+        result = build_tools(config)
+        for agent in ("A", "B"):
+            defs = result["toolDefinitions"][agent]
+            assert len(defs) == 1
+            assert defs[0]["type"] == "a2a_preview"
+
+    def test_a2a_flag_off_skips(self):
+        config = {
+            "projectEndpoint": "https://endpoint",
+            "agentsManifest": [{"name": "A", "baseUrl": "https://a"}],
+            "agents": [{"name": "A", "tools": [{"type": "a2a"}]}],
+        }
+        result = build_tools(config)
+        assert result["toolDefinitions"]["A"] == []
+
+    def test_a2a_explicit_peers_preferred_over_manifest(self):
+        defs = build_tool_definitions(
+            agent_tools=[{
+                "type": "a2a",
+                "experimental": True,
+                "peers": [{"name": "Explicit", "base_url": "https://explicit"}],
+            }],
+            agents_manifest=[{"name": "FromManifest", "baseUrl": "https://manifest"}],
+        )
+        assert len(defs) == 1
+        names = [a["name"] for a in defs[0]["a2a_preview"]["agents"]]
+        assert names == ["Explicit"]

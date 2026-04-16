@@ -198,10 +198,41 @@ def setup_connections(config: dict) -> dict:
         if conn:
             result["aiSearch"] = conn
 
-    # Bing Search: skipped — the Bing Search API has been retired
-    # (aka.ms/BingAPIsRetirement). Foundry's built-in bing_grounding tool uses
-    # the project's managed web search capability and does NOT require a
-    # project connection.
+    # Grounding with Bing Search — requires a pre-provisioned Microsoft.Bing/accounts
+    # resource. The legacy Bing Search API is retired (aka.ms/BingAPIsRetirement);
+    # Foundry's built-in bing_grounding tool consumes the successor service via a
+    # project connection of category 'GroundingWithBingSearch'. We create the
+    # connection here when the caller supplies a resourceId (preferred) or an
+    # explicit endpoint/apiKey pair.
+    if "bingSearch" in connections_cfg:
+        bing = connections_cfg["bingSearch"]
+        resource_id = bing.get("resourceId") or bing.get("id")
+        bing_endpoint = bing.get("endpoint") or "https://api.bing.microsoft.com/"
+        bing_metadata: dict[str, str] = {}
+        if resource_id:
+            bing_metadata["ResourceId"] = resource_id
+        bing_conn_target = resource_id or bing_endpoint
+        if bing_conn_target:
+            conn = create_connection(
+                arm_base=arm_base,
+                arm_token=arm_token,
+                arm_api_version=arm_api_version,
+                subscription_id=subscription_id,
+                resource_group=resource_group,
+                account_name=account_name,
+                project_name=project_name,
+                connection_name=f"{prefix}-bing-grounding",
+                connection_type="GroundingWithBingSearch",
+                target=bing_conn_target,
+                metadata=bing_metadata or None,
+            )
+            if conn:
+                result["bingSearch"] = conn
+        else:
+            log.info(
+                "Bing Grounding connection skipped: no resourceId or endpoint "
+                "set under workloads.foundry.connections.bingSearch.",
+            )
 
     # Blob Storage connection — requires ContainerName + AccountName metadata,
     # not just the target endpoint.
@@ -445,15 +476,49 @@ def build_tool_definitions(
 
         elif tool_type == "a2a":
             # a2a_preview is a Foundry preview tool. The public API shape is in
-            # flux — current builds of 2025-05-15-preview reject both the
-            # per-peer {name, base_url} shape and the tool-level
-            # {base_url}/{project_connection_id} shape we've tried. Skipping
-            # until the canonical schema is confirmed to avoid breaking the
-            # whole agent payload (a failed tool aborts the entire create).
+            # flux — prior builds rejected the per-peer {name, base_url} shape,
+            # the tool-level {base_url}/{project_connection_id} shape, and
+            # empty payloads. The safe default is to skip the tool so a
+            # single broken payload doesn't abort the whole agent create.
+            #
+            # Opt-in experimental mode (workloads.foundry.experimentalA2A=true
+            # in config → tool["experimental"]=True) emits a best-guess
+            # {agents: [{name, base_url}]} payload so schema discovery can
+            # keep progressing against live tenants. Failures are isolated
+            # to the one agent with a2a; the rest continue.
+            if not tool.get("experimental"):
+                log.warning(
+                    "a2a tool skipped: a2a_preview schema is not stable in the "
+                    "current preview API. Set workloads.foundry.experimentalA2A=true "
+                    "to opt into schema probing on this deploy."
+                )
+                continue
+
+            peers = tool.get("peers") or []
+            if not peers and agents_manifest:
+                # Fall back to wiring every other deployed agent as a peer.
+                peers = [
+                    {"name": m.get("name"), "base_url": m.get("baseUrl")}
+                    for m in agents_manifest
+                    if m.get("name") and m.get("baseUrl")
+                ]
+            if not peers:
+                log.warning("a2a experimental skipped: no peers available.")
+                continue
+
             log.warning(
-                "a2a tool skipped: a2a_preview schema is not stable in the "
-                "current preview API — tracked for follow-up."
+                "a2a EXPERIMENTAL enabled — emitting best-guess payload. "
+                "Expect HTTP 400 on current preview; captured for schema discovery."
             )
+            definitions.append({
+                "type": "a2a_preview",
+                "a2a_preview": {
+                    "agents": [
+                        {"name": p.get("name"), "base_url": p.get("base_url")}
+                        for p in peers
+                    ],
+                },
+            })
 
         elif tool_type == "image_generation":
             definitions.append({"type": "image_generation"})
@@ -468,6 +533,7 @@ def build_tools(config: dict) -> dict:
     vector_stores = config.get("vectorStores", {})
     agents_manifest = config.get("agentsManifest", [])
     project_endpoint = config.get("projectEndpoint", "")
+    experimental_a2a = bool(config.get("experimentalA2A"))
 
     result = {}
     for agent in agents:
@@ -475,6 +541,14 @@ def build_tools(config: dict) -> dict:
         agent_tools = agent.get("tools", [])
         if not agent_tools:
             continue
+
+        # Propagate the top-level experimentalA2A flag into each a2a tool dict
+        # so build_tool_definitions stays a pure function of its inputs.
+        if experimental_a2a:
+            agent_tools = [
+                dict(t, experimental=True) if t.get("type") == "a2a" else t
+                for t in agent_tools
+            ]
 
         vs_ids = []
         if agent_name in vector_stores:

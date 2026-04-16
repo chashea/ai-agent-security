@@ -2,6 +2,8 @@
 
 PowerShell scripts for authenticating Azure Managed Identities to the Microsoft Graph API. Works with any Azure compute resource (Function App, VM, Container App, App Service).
 
+> **Deployer integration (v0.10.0+):** Instead of running these scripts by hand, you can declare the permissions your Foundry agents need via `workloads.agentIdentity.graphPermissions` in `config.json`. `Deploy.ps1` will assign them to the Foundry account's system-assigned MI during the AgentIdentity workload and revoke them on teardown. The scripts below remain available for ad-hoc use against any other Managed Identity.
+
 ## What's Included
 
 | Script | Purpose |

@@ -132,6 +132,159 @@ function Resolve-RoleScope {
     }
 }
 
+# ─── Graph App Role Assignments ──────────────────────────────────────────────
+
+<#
+.SYNOPSIS
+    Grants Microsoft Graph application permissions to the Foundry account's
+    system-assigned managed identity.
+.DESCRIPTION
+    Each requested Graph application permission (e.g., User.Read.All) is
+    resolved to an AppRole on the Graph service principal and assigned to
+    the Foundry MI via Microsoft Graph PowerShell. Idempotent — skips
+    permissions already assigned. Returns an array of hashtables describing
+    each grant, suitable for the manifest.
+.NOTES
+    Requires the caller to already be connected to Microsoft Graph with
+    AppRoleAssignment.ReadWrite.All + Application.Read.All scopes (Deploy.ps1
+    handles this as part of its connect step when graphPermissions are
+    configured).
+#>
+function Grant-AgentIdentityGraphPermissions {
+    [CmdletBinding(SupportsShouldProcess)]
+    [OutputType([System.Collections.Generic.List[hashtable]])]
+    param(
+        [Parameter(Mandatory)] [string]$PrincipalId,
+        [Parameter(Mandatory)] [string[]]$Permissions
+    )
+
+    $grants = [System.Collections.Generic.List[hashtable]]::new()
+
+    if (-not $Permissions -or $Permissions.Count -eq 0) {
+        return , @($grants)
+    }
+
+    # Resolve Graph SP (appId is a well-known constant).
+    $graphAppId = '00000003-0000-0000-c000-000000000000'
+    try {
+        $graphSpn = Get-MgServicePrincipal -Filter "appId eq '$graphAppId'" -ErrorAction Stop
+    }
+    catch {
+        Write-LabLog -Message "AgentIdentity/Graph: could not resolve Microsoft Graph service principal: $($_.Exception.Message)" -Level Warning
+        return , @($grants)
+    }
+    if (-not $graphSpn) {
+        Write-LabLog -Message 'AgentIdentity/Graph: Microsoft Graph service principal not found in tenant.' -Level Warning
+        return , @($grants)
+    }
+
+    # Existing assignments on the Foundry MI (for idempotency).
+    try {
+        $existing = Get-MgServicePrincipalAppRoleAssignment -ServicePrincipalId $PrincipalId -ErrorAction Stop
+    }
+    catch {
+        Write-LabLog -Message "AgentIdentity/Graph: could not enumerate existing app-role assignments on ${PrincipalId}: $($_.Exception.Message)" -Level Warning
+        $existing = @()
+    }
+    $existingRoleIds = @($existing | Select-Object -ExpandProperty AppRoleId)
+
+    foreach ($permName in $Permissions) {
+        $appRole = $graphSpn.AppRoles | Where-Object {
+            $_.Value -eq $permName -and $_.AllowedMemberTypes -contains 'Application'
+        } | Select-Object -First 1
+
+        if (-not $appRole) {
+            Write-LabLog -Message "AgentIdentity/Graph: app role '$permName' not found on Microsoft Graph — skipping." -Level Warning
+            continue
+        }
+
+        if ($appRole.Id -in $existingRoleIds) {
+            Write-LabLog -Message "AgentIdentity/Graph: $permName already assigned — skipping." -Level Info
+            $existingAssignment = $existing | Where-Object { $_.AppRoleId -eq $appRole.Id } | Select-Object -First 1
+            $grants.Add(@{
+                permission       = $permName
+                appRoleId        = [string]$appRole.Id
+                assignmentId     = if ($existingAssignment) { [string]$existingAssignment.Id } else { $null }
+                resourceId       = [string]$graphSpn.Id
+                status           = 'existing'
+            })
+            continue
+        }
+
+        if (-not $PSCmdlet.ShouldProcess("principal $PrincipalId", "Grant Graph permission '$permName'")) {
+            $grants.Add(@{
+                permission   = $permName
+                appRoleId    = [string]$appRole.Id
+                assignmentId = $null
+                resourceId   = [string]$graphSpn.Id
+                status       = 'whatif'
+            })
+            continue
+        }
+
+        try {
+            $body = @{
+                principalId = $PrincipalId
+                resourceId  = $graphSpn.Id
+                appRoleId   = $appRole.Id
+            }
+            $result = New-MgServicePrincipalAppRoleAssignment -ServicePrincipalId $PrincipalId -BodyParameter $body -ErrorAction Stop
+            Write-LabLog -Message "AgentIdentity/Graph: assigned $permName to principal $PrincipalId" -Level Success
+            $grants.Add(@{
+                permission   = $permName
+                appRoleId    = [string]$appRole.Id
+                assignmentId = if ($result) { [string]$result.Id } else { $null }
+                resourceId   = [string]$graphSpn.Id
+                status       = 'created'
+            })
+        }
+        catch {
+            Write-LabLog -Message "AgentIdentity/Graph: failed to assign ${permName}: $($_.Exception.Message)" -Level Warning
+            $grants.Add(@{
+                permission   = $permName
+                appRoleId    = [string]$appRole.Id
+                assignmentId = $null
+                resourceId   = [string]$graphSpn.Id
+                status       = 'failed'
+                error        = [string]$_.Exception.Message
+            })
+        }
+    }
+
+    return , @($grants)
+}
+
+function Revoke-AgentIdentityGraphPermissions {
+    [CmdletBinding(SupportsShouldProcess)]
+    param(
+        [Parameter(Mandatory)] [string]$PrincipalId,
+        [Parameter(Mandatory)] [array]$Grants
+    )
+
+    foreach ($grant in $Grants) {
+        $assignmentId = if ($grant -is [hashtable]) { $grant['assignmentId'] }
+                        elseif ($grant.PSObject.Properties['assignmentId']) { [string]$grant.assignmentId }
+                        else { $null }
+        $permName = if ($grant -is [hashtable]) { $grant['permission'] }
+                    elseif ($grant.PSObject.Properties['permission']) { [string]$grant.permission }
+                    else { 'unknown' }
+
+        if (-not $assignmentId) {
+            Write-LabLog -Message "AgentIdentity/Graph: skipping $permName — no assignmentId in manifest." -Level Warning
+            continue
+        }
+        if (-not $PSCmdlet.ShouldProcess("principal $PrincipalId", "Revoke Graph permission '$permName'")) { continue }
+
+        try {
+            Remove-MgServicePrincipalAppRoleAssignment -ServicePrincipalId $PrincipalId -AppRoleAssignmentId $assignmentId -ErrorAction Stop
+            Write-LabLog -Message "AgentIdentity/Graph: revoked $permName ($assignmentId)" -Level Success
+        }
+        catch {
+            Write-LabLog -Message "AgentIdentity/Graph: failed to revoke ${permName}: $($_.Exception.Message)" -Level Warning
+        }
+    }
+}
+
 # ─── Deploy ──────────────────────────────────────────────────────────────────
 
 function Deploy-AgentIdentity {
@@ -149,11 +302,12 @@ function Deploy-AgentIdentity {
     $ai     = $Config.workloads.agentIdentity
 
     $result = @{
-        principalId     = $null
-        principalType   = 'ServicePrincipal'
-        identitySource  = 'foundryAccount'
-        roleAssignments = @()
-        skippedTools    = @()
+        principalId         = $null
+        principalType       = 'ServicePrincipal'
+        identitySource      = 'foundryAccount'
+        roleAssignments     = @()
+        skippedTools        = @()
+        graphPermissions    = @()
     }
 
     # Check if auto-derive is enabled (default: true)
@@ -290,6 +444,29 @@ function Deploy-AgentIdentity {
 
     $result.roleAssignments = @($assignedRoles)
     Write-LabLog -Message "AgentIdentity: $($assignedRoles.Count) role assignment(s) configured for principal $principalId" -Level Success
+
+    # Optional: grant Microsoft Graph application permissions to the Foundry MI.
+    # Opt-in via workloads.agentIdentity.graphPermissions = ["User.Read.All", ...].
+    $graphPerms = @()
+    if ($ai.PSObject.Properties['graphPermissions']) {
+        $graphPerms = @($ai.graphPermissions | Where-Object { $_ -and -not [string]::IsNullOrWhiteSpace($_) })
+    }
+    if ($graphPerms.Count -gt 0) {
+        # Verify Graph SDK modules are loaded — Deploy.ps1 already connects,
+        # but when the workload is invoked in isolation (e.g., tests, reruns)
+        # we skip with a clear warning rather than crashing.
+        if (-not (Get-Command Get-MgServicePrincipal -ErrorAction SilentlyContinue)) {
+            Write-LabLog -Message "AgentIdentity: graphPermissions configured but Microsoft.Graph SDK not available — skipping Graph grants. Run Deploy.ps1 which connects Graph for you." -Level Warning
+        }
+        else {
+            $grants = Grant-AgentIdentityGraphPermissions -PrincipalId $principalId -Permissions $graphPerms
+            $result.graphPermissions = @($grants)
+            $created = @($grants | Where-Object { $_.status -eq 'created' }).Count
+            $existing = @($grants | Where-Object { $_.status -eq 'existing' }).Count
+            Write-LabLog -Message "AgentIdentity: Graph permissions — $created assigned, $existing already present (of $($graphPerms.Count) requested)" -Level Success
+        }
+    }
+
     return $result
 }
 
@@ -343,6 +520,24 @@ function Remove-AgentIdentity {
     }
 
     Write-LabLog -Message "AgentIdentity: removed $($roleAssignments.Count) role assignment(s) for prefix '$prefix'" -Level Success
+
+    # Revoke any Graph permission grants recorded in the manifest.
+    $graphGrants = @()
+    if ($Manifest -and $Manifest.PSObject.Properties['graphPermissions']) {
+        $graphGrants = @($Manifest.graphPermissions)
+    }
+    if ($graphGrants.Count -gt 0) {
+        $principalId = if ($Manifest.PSObject.Properties['principalId']) { [string]$Manifest.principalId } else { $null }
+        if (-not $principalId) {
+            Write-LabLog -Message "AgentIdentity: manifest has graphPermissions but no principalId — cannot revoke." -Level Warning
+        }
+        elseif (-not (Get-Command Remove-MgServicePrincipalAppRoleAssignment -ErrorAction SilentlyContinue)) {
+            Write-LabLog -Message "AgentIdentity: Microsoft.Graph SDK not available — skipping Graph permission revocations." -Level Warning
+        }
+        else {
+            Revoke-AgentIdentityGraphPermissions -PrincipalId $principalId -Grants $graphGrants
+        }
+    }
 }
 
 # ─── Exports ─────────────────────────────────────────────────────────────────
@@ -351,4 +546,6 @@ Export-ModuleMember -Function @(
     'Deploy-AgentIdentity'
     'Remove-AgentIdentity'
     'Get-ToolRoleRequirements'
+    'Grant-AgentIdentityGraphPermissions'
+    'Revoke-AgentIdentityGraphPermissions'
 )

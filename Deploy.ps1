@@ -191,6 +191,37 @@ try {
         if ($FoundryOnly) {
             $connectParams['GraphScopes'] = @('AppCatalog.ReadWrite.All')
         }
+        # If agentIdentity.graphPermissions are configured, Deploy-AgentIdentity
+        # needs to assign Graph app roles to the Foundry MI, which requires
+        # these admin scopes on the connected user/SP.
+        $needsGraphGrantScopes = $false
+        if ($deployFoundry -and $Config.workloads.PSObject.Properties['agentIdentity']) {
+            $ai = $Config.workloads.agentIdentity
+            if ($ai.PSObject.Properties['graphPermissions']) {
+                $configured = @($ai.graphPermissions | Where-Object { $_ -and -not [string]::IsNullOrWhiteSpace($_) })
+                if ($configured.Count -gt 0) { $needsGraphGrantScopes = $true }
+            }
+        }
+        if ($needsGraphGrantScopes) {
+            $grantScopes = @('AppRoleAssignment.ReadWrite.All', 'Application.Read.All')
+            if ($connectParams.ContainsKey('GraphScopes')) {
+                $connectParams['GraphScopes'] = @($connectParams['GraphScopes'] + $grantScopes) | Sort-Object -Unique
+            }
+            else {
+                # Append to the default broad scope list rather than replacing it,
+                # otherwise other workloads lose the scopes they need.
+                $defaultScopes = @(
+                    'User.ReadWrite.All'
+                    'Group.ReadWrite.All'
+                    'Organization.Read.All'
+                    'Policy.ReadWrite.ConditionalAccess'
+                    'Policy.Read.All'
+                    'eDiscovery.ReadWrite.All'
+                    'AppCatalog.ReadWrite.All'
+                )
+                $connectParams['GraphScopes'] = @($defaultScopes + $grantScopes) | Sort-Object -Unique
+            }
+        }
         # Device code auth works in both TTY and non-TTY pwsh. Connect-MgGraph
         # otherwise tries a broker/browser flow that blocks when stdin is not a
         # terminal (e.g. background jobs, CI, claude-code pipes).

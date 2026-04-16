@@ -120,28 +120,40 @@ repo cannot provision. Connection creation requires the real URL.
 on every `search_configurations[]` entry, so the builder skips the tool
 with a warning when no `bingSearch` connection is configured.
 
-**Where.** Azure portal → Create a resource → search "Grounding with Bing
-Search" → create in the target subscription. Then add its resource ID
-to `config.json` → `workloads.foundry.connections.bingSearch`.
+**Automated path (v0.10.0+).** Set `workloads.foundry.connections.bingSearch.provision: true`
+in `config.json`. `Deploy.ps1 -FoundryOnly` will:
+1. PUT a `Microsoft.Bing/accounts` resource (kind `Bing.Grounding`, SKU
+   `G1` by default) in the same resource group as the Foundry account.
+2. Wire the resulting resource ID into the project connection named
+   `<prefix>-bing-grounding`.
+3. On teardown (`Deploy.ps1 -RemoveOnly -FoundryOnly`), the account is
+   removed alongside the rest of the workload.
 
-**What to do.**
-1. Provision the Bing Search resource.
-2. Capture its resource ID (looks like
-   `/subscriptions/<sub>/resourceGroups/<rg>/providers/Microsoft.Bing/accounts/<name>`).
-3. Add to `config.json`:
-   ```json
-   "bingSearch": {
-     "resourceId": "/subscriptions/<sub>/resourceGroups/<rg>/providers/Microsoft.Bing/accounts/<name>",
-     "apiKey": "<key>"
-   }
-   ```
-4. Rerun `Deploy.ps1 -FoundryOnly`. `setup-connections` will create the
-   project connection; the builder will include `bing_grounding` on
-   Sales-Research.
+Example:
+```json
+"bingSearch": {
+  "provision": true,
+  "name": "pv-foundry-bing",
+  "sku": "G1"
+}
+```
 
-**Why this is manual.** Bing Search is billable and tenant-specific —
-the repo does not provision it because cost and region choices vary.
-Skip entirely if you don't need live web grounding.
+**Manual path.** If you already have a Bing Grounding account (different
+subscription, shared resource, etc.), provide its resource ID and set
+`provision: false`:
+```json
+"bingSearch": {
+  "provision": false,
+  "resourceId": "/subscriptions/<sub>/resourceGroups/<rg>/providers/Microsoft.Bing/accounts/<name>"
+}
+```
+Then rerun `Deploy.ps1 -FoundryOnly`. `setup-connections` will create the
+project connection; the builder will include `bing_grounding` on
+Sales-Research.
+
+**Why `provision` defaults to false.** Bing Grounding is billable and
+region-limited. The repo doesn't enable it unprompted. Skip entirely if
+you don't need live web grounding.
 
 ## 6. Pre-connect Graph to skip device-code prompts on reruns
 

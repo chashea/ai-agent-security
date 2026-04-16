@@ -52,10 +52,13 @@ if [ "${#staged_ps[@]}" -gt 0 ]; then
                 exit 1
             }
             \$files = @(${ps_files_joined})
-            \$results = Invoke-ScriptAnalyzer -Path \$files -Severity Warning -ExcludeRule PSAvoidUsingWriteHost,PSUseSingularNouns,PSUseBOMForUnicodeEncodedFile
-            if (\$results) {
-                \$results | Format-Table -AutoSize
-                Write-Host \"PSScriptAnalyzer found \$(\$results.Count) issue(s)\" -ForegroundColor Red
+            \$all = @()
+            foreach (\$f in \$files) {
+                \$all += Invoke-ScriptAnalyzer -Path \$f -Severity Warning -ExcludeRule PSAvoidUsingWriteHost,PSUseSingularNouns,PSUseBOMForUnicodeEncodedFile
+            }
+            if (\$all.Count -gt 0) {
+                \$all | Format-Table -AutoSize
+                Write-Host \"PSScriptAnalyzer found \$(\$all.Count) issue(s)\" -ForegroundColor Red
                 exit 1
             }
             Write-Host 'PSScriptAnalyzer: clean' -ForegroundColor Green
