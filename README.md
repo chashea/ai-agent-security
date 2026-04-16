@@ -259,3 +259,36 @@ See [`docs/troubleshooting.md`](docs/troubleshooting.md) for a catalog of
 errors encountered on MCAPS-governed tenants and the fixes for each.
 Covers Foundry project RP quirks, connection API gotchas, Teams catalog
 publish idempotency, and more.
+
+## Developer tooling
+
+### Pre-commit hook
+
+Mirrors CI checks locally so lint errors don't land on main:
+
+```bash
+./scripts/install-hooks.sh
+```
+
+Runs `ruff` on staged `scripts/**/*.py` and `PSScriptAnalyzer`
+(Warning+, same exclusions as `.github/workflows/validate.yml`) on
+staged `*.ps1` / `*.psm1` / `*.psd1`. Bypass only when explicitly
+instructed: `git commit --no-verify`.
+
+### Claude Code subagents
+
+Specialized agents live in `.claude/agents/` and auto-activate on
+matching triggers:
+
+- **`foundry-troubleshooter`** — maps deploy errors to `docs/troubleshooting.md` entries.
+- **`foundry-verifier`** — read-only check that deployed agent tool definitions match `config.json`.
+- **`redteam-analyst`** — parses Step 8 red-team scorecards, ranks findings by ASR, and points at `infra/guardrails.bicep` / `config.json` for remediation.
+- **`evaluator-interpreter`** — interprets Step 7 evaluator output (trust boundaries, red team resilience, prompt vulnerability), flags regressions vs. prior runs.
+
+### MCP servers
+
+Configured in `.github/copilot/mcp.json`:
+
+- `microsoft-learn` — Microsoft docs search.
+- `azure` — live Azure subscription / Foundry / Key Vault state via `@azure/mcp`.
+- `github` — PRs, issues, workflow runs.

@@ -1,0 +1,72 @@
+#!/usr/bin/env bash
+# Pre-commit hook: mirror CI checks locally to shift-left lint failures.
+# Enforces:
+#   - ruff on staged scripts/**/*.py
+#   - PSScriptAnalyzer (Warning+) on staged *.ps1 / *.psm1 / *.psd1
+# Skip with: git commit --no-verify  (only when the user explicitly asks)
+
+set -euo pipefail
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m'
+
+fail=0
+
+staged_py=()
+while IFS= read -r f; do
+    [ -n "$f" ] && staged_py+=("$f")
+done < <(git diff --cached --name-only --diff-filter=ACM | grep -E '^scripts/.*\.py$' || true)
+
+staged_ps=()
+while IFS= read -r f; do
+    [ -n "$f" ] && staged_ps+=("$f")
+done < <(git diff --cached --name-only --diff-filter=ACM | grep -E '\.(ps1|psm1|psd1)$' || true)
+
+if [ "${#staged_py[@]}" -gt 0 ]; then
+    echo -e "${YELLOW}[pre-commit] ruff: ${#staged_py[@]} Python file(s)${NC}"
+    if ! command -v ruff >/dev/null 2>&1; then
+        echo -e "${RED}ruff not installed. Run: pip install ruff${NC}"
+        fail=1
+    else
+        if ! ruff check "${staged_py[@]}"; then
+            echo -e "${RED}ruff failed. Fix with: ruff check --fix ${staged_py[*]}${NC}"
+            fail=1
+        fi
+    fi
+fi
+
+if [ "${#staged_ps[@]}" -gt 0 ]; then
+    echo -e "${YELLOW}[pre-commit] PSScriptAnalyzer: ${#staged_ps[@]} PowerShell file(s)${NC}"
+    if ! command -v pwsh >/dev/null 2>&1; then
+        echo -e "${RED}pwsh not installed — cannot run PSScriptAnalyzer.${NC}"
+        fail=1
+    else
+        ps_files_joined=$(printf "'%s'," "${staged_ps[@]}")
+        ps_files_joined=${ps_files_joined%,}
+        pwsh -NoProfile -Command "
+            \$ErrorActionPreference = 'Stop'
+            if (-not (Get-Module -ListAvailable -Name PSScriptAnalyzer)) {
+                Write-Host 'PSScriptAnalyzer not installed. Run: Install-Module -Name PSScriptAnalyzer -Force -Scope CurrentUser' -ForegroundColor Red
+                exit 1
+            }
+            \$files = @(${ps_files_joined})
+            \$results = Invoke-ScriptAnalyzer -Path \$files -Severity Warning -ExcludeRule PSAvoidUsingWriteHost,PSUseSingularNouns,PSUseBOMForUnicodeEncodedFile
+            if (\$results) {
+                \$results | Format-Table -AutoSize
+                Write-Host \"PSScriptAnalyzer found \$(\$results.Count) issue(s)\" -ForegroundColor Red
+                exit 1
+            }
+            Write-Host 'PSScriptAnalyzer: clean' -ForegroundColor Green
+        " || fail=1
+    fi
+fi
+
+if [ $fail -ne 0 ]; then
+    echo -e "${RED}[pre-commit] blocked. Fix errors above or --no-verify (if explicitly instructed).${NC}"
+    exit 1
+fi
+
+echo -e "${GREEN}[pre-commit] ok${NC}"
+exit 0
