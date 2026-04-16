@@ -90,6 +90,63 @@ Foundry agents show up under Defender portal → AI security → Agents.
 scoped and the module can't toggle it from a per-deploy script without
 additional role permissions. `Deploy.ps1` only warns.
 
+### 3a. (Optional) Deploy the Foundry Control Plane guardrail-baseline initiative
+
+**When.** After the Foundry workload is deployed and you want Azure Policy
+to *enforce* that every model deployment ships with the full guardrail
+stack — catching the case where someone creates a rogue deployment that
+skips the RAI policy or weakens a filter. Mirrors the portal flow at
+[Create a guardrail policy](https://learn.microsoft.com/en-us/azure/foundry/control-plane/quickstart-create-guardrail-policy),
+but as code.
+
+**What it does.** `infra/foundry-guardrail-policies.bicep` creates 8
+custom policy definitions + 1 initiative + 1 subscription-scope
+assignment. The controls:
+
+| # | Definition | Target | Enforces |
+|---|---|---|---|
+| 1 | `require-raipolicy-on-deployment` | `accounts/deployments` | `raiPolicyName` must be set |
+| 2 | `require-defaultv2-base` | `accounts/raiPolicies` | `basePolicyName == Microsoft.DefaultV2` |
+| 3 | `require-blocking-mode` | `accounts/raiPolicies` | `mode == Blocking` (no audit-only) |
+| 4 | `require-prompt-shield-jailbreak` | `accounts/raiPolicies` | Blocking `jailbreak` filter on Prompt |
+| 5 | `require-prompt-shield-indirect-attack` | `accounts/raiPolicies` | Blocking `indirect_attack` filter on Prompt |
+| 6 | `require-harmful-content-low-threshold` | `accounts/raiPolicies` | hate/sexual/violence/selfharm blocking at severity Low on Prompt + Completion |
+| 7 | `require-protected-material-filters` | `accounts/raiPolicies` | Blocking `protected_material_text` + `protected_material_code` on Completion |
+| 8 | `require-custom-blocklist` | `accounts/raiPolicies` | At least one `customBlocklists` entry with `blocking=true` |
+
+**Deploy (Audit mode — safe to start here):**
+```bash
+az deployment sub create \
+  --name aisec-guardrails-$(date +%Y%m%d-%H%M%S) \
+  --location eastus2 \
+  --template-file infra/foundry-guardrail-policies.bicep \
+  --parameters defaultEffect=Audit
+```
+
+**Ramp to Deny once clean:**
+```bash
+az deployment sub create \
+  --name aisec-guardrails-deny-$(date +%Y%m%d-%H%M%S) \
+  --location eastus2 \
+  --template-file infra/foundry-guardrail-policies.bicep \
+  --parameters defaultEffect=Deny
+```
+
+**Check compliance:**
+```bash
+az policy state summarize \
+  --policy-set-definition $(az policy set-definition show \
+    --name aisec-foundry-guardrails --query id -o tsv) \
+  --query 'value[0].policyAssignments[].results'
+```
+
+**Why this is optional.** The main `Deploy.ps1` pipeline already configures
+the RAI policy directly on the Foundry account (see `infra/guardrails.bicep`).
+The Azure Policy initiative is a *second layer*: it prevents regressions
+if a new model deployment is added outside the pipeline. Skip it for
+pure throw-away demos; deploy it for any lab that simulates production
+governance.
+
 ## 4. Populate `connections.sharePoint.siteUrl` (optional)
 
 **When.** If you want the `sharepoint_grounding` tool on any agent to

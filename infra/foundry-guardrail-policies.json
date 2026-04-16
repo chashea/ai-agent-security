@@ -1,0 +1,696 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2018-05-01/subscriptionDeploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "metadata": {
+    "_generator": {
+      "name": "bicep",
+      "version": "0.39.26.7824",
+      "templateHash": "7563981223188173630"
+    }
+  },
+  "parameters": {
+    "namePrefix": {
+      "type": "string",
+      "defaultValue": "aisec",
+      "metadata": {
+        "description": "Prefix used on every policy definition, initiative, and assignment name."
+      }
+    },
+    "displayPrefix": {
+      "type": "string",
+      "defaultValue": "AISec Foundry Guardrail",
+      "metadata": {
+        "description": "Display-name prefix shown in the portal."
+      }
+    },
+    "defaultEffect": {
+      "type": "string",
+      "defaultValue": "Audit",
+      "allowedValues": [
+        "Audit",
+        "Deny",
+        "Disabled"
+      ],
+      "metadata": {
+        "description": "Default effect applied to every policy in the initiative unless overridden."
+      }
+    },
+    "skipAssignment": {
+      "type": "bool",
+      "defaultValue": false,
+      "metadata": {
+        "description": "Skip creating the subscription-scope assignment (definitions + initiative only)."
+      }
+    }
+  },
+  "variables": {
+    "metadataCommon": {
+      "category": "Microsoft Foundry",
+      "version": "1.0.0",
+      "source": "github.com/chashea/ai-agent-security/infra/foundry-guardrail-policies.bicep"
+    }
+  },
+  "resources": [
+    {
+      "type": "Microsoft.Authorization/policyDefinitions",
+      "apiVersion": "2023-04-01",
+      "name": "[format('{0}-require-raipolicy-on-deployment', parameters('namePrefix'))]",
+      "properties": {
+        "displayName": "[format('{0}: Model deployment must have an RAI policy attached', parameters('displayPrefix'))]",
+        "description": "Denies or audits Azure AI Foundry / Azure OpenAI model deployments that do not reference a responsible-AI (raiPolicyName) policy. Equivalent to the \"Content safety filters\" control in the Foundry Control Plane guardrail wizard.",
+        "mode": "All",
+        "metadata": "[variables('metadataCommon')]",
+        "parameters": {
+          "effect": {
+            "type": "String",
+            "allowedValues": [
+              "Audit",
+              "Deny",
+              "Disabled"
+            ],
+            "defaultValue": "Audit",
+            "metadata": {
+              "displayName": "Effect"
+            }
+          }
+        },
+        "policyRule": {
+          "if": {
+            "allOf": [
+              {
+                "field": "type",
+                "equals": "Microsoft.CognitiveServices/accounts/deployments"
+              },
+              {
+                "anyOf": [
+                  {
+                    "field": "Microsoft.CognitiveServices/accounts/deployments/raiPolicyName",
+                    "exists": "false"
+                  },
+                  {
+                    "field": "Microsoft.CognitiveServices/accounts/deployments/raiPolicyName",
+                    "equals": ""
+                  }
+                ]
+              }
+            ]
+          },
+          "then": {
+            "effect": "[[parameters('effect')]"
+          }
+        }
+      }
+    },
+    {
+      "type": "Microsoft.Authorization/policyDefinitions",
+      "apiVersion": "2023-04-01",
+      "name": "[format('{0}-require-defaultv2-base', parameters('namePrefix'))]",
+      "properties": {
+        "displayName": "[format('{0}: RAI policies must derive from Microsoft.DefaultV2', parameters('displayPrefix'))]",
+        "description": "Denies or audits RAI policies that inherit from the legacy Microsoft.Default base (v0). DefaultV2 is required for Prompt Shields, indirect-attack detection, and protected-material filters.",
+        "mode": "All",
+        "metadata": "[variables('metadataCommon')]",
+        "parameters": {
+          "effect": {
+            "type": "String",
+            "allowedValues": [
+              "Audit",
+              "Deny",
+              "Disabled"
+            ],
+            "defaultValue": "Audit",
+            "metadata": {
+              "displayName": "Effect"
+            }
+          }
+        },
+        "policyRule": {
+          "if": {
+            "allOf": [
+              {
+                "field": "type",
+                "equals": "Microsoft.CognitiveServices/accounts/raiPolicies"
+              },
+              {
+                "field": "Microsoft.CognitiveServices/accounts/raiPolicies/basePolicyName",
+                "notEquals": "Microsoft.DefaultV2"
+              }
+            ]
+          },
+          "then": {
+            "effect": "[[parameters('effect')]"
+          }
+        }
+      }
+    },
+    {
+      "type": "Microsoft.Authorization/policyDefinitions",
+      "apiVersion": "2023-04-01",
+      "name": "[format('{0}-require-blocking-mode', parameters('namePrefix'))]",
+      "properties": {
+        "displayName": "[format('{0}: RAI policies must run in Blocking mode', parameters('displayPrefix'))]",
+        "description": "Denies or audits RAI policies whose mode is not \"Blocking\". Audit-only mode logs violations but lets traffic through — not suitable for production guardrails.",
+        "mode": "All",
+        "metadata": "[variables('metadataCommon')]",
+        "parameters": {
+          "effect": {
+            "type": "String",
+            "allowedValues": [
+              "Audit",
+              "Deny",
+              "Disabled"
+            ],
+            "defaultValue": "Audit",
+            "metadata": {
+              "displayName": "Effect"
+            }
+          }
+        },
+        "policyRule": {
+          "if": {
+            "allOf": [
+              {
+                "field": "type",
+                "equals": "Microsoft.CognitiveServices/accounts/raiPolicies"
+              },
+              {
+                "field": "Microsoft.CognitiveServices/accounts/raiPolicies/mode",
+                "notEquals": "Blocking"
+              }
+            ]
+          },
+          "then": {
+            "effect": "[[parameters('effect')]"
+          }
+        }
+      }
+    },
+    {
+      "type": "Microsoft.Authorization/policyDefinitions",
+      "apiVersion": "2023-04-01",
+      "name": "[format('{0}-require-prompt-shield-jailbreak', parameters('namePrefix'))]",
+      "properties": {
+        "displayName": "[format('{0}: Prompt Shields jailbreak filter must be blocking', parameters('displayPrefix'))]",
+        "description": "Denies or audits RAI policies that do not include a Prompt-source \"jailbreak\" content filter with enabled=true and blocking=true. Required to catch DAN-style and role-reset attacks.",
+        "mode": "All",
+        "metadata": "[variables('metadataCommon')]",
+        "parameters": {
+          "effect": {
+            "type": "String",
+            "allowedValues": [
+              "Audit",
+              "Deny",
+              "Disabled"
+            ],
+            "defaultValue": "Audit",
+            "metadata": {
+              "displayName": "Effect"
+            }
+          }
+        },
+        "policyRule": {
+          "if": {
+            "allOf": [
+              {
+                "field": "type",
+                "equals": "Microsoft.CognitiveServices/accounts/raiPolicies"
+              },
+              {
+                "not": {
+                  "field": "Microsoft.CognitiveServices/accounts/raiPolicies/contentFilters[*]",
+                  "where": {
+                    "allOf": [
+                      {
+                        "field": "Microsoft.CognitiveServices/accounts/raiPolicies/contentFilters[*].name",
+                        "equals": "jailbreak"
+                      },
+                      {
+                        "field": "Microsoft.CognitiveServices/accounts/raiPolicies/contentFilters[*].source",
+                        "equals": "Prompt"
+                      },
+                      {
+                        "field": "Microsoft.CognitiveServices/accounts/raiPolicies/contentFilters[*].enabled",
+                        "equals": true
+                      },
+                      {
+                        "field": "Microsoft.CognitiveServices/accounts/raiPolicies/contentFilters[*].blocking",
+                        "equals": true
+                      }
+                    ]
+                  },
+                  "greaterOrEquals": 1
+                }
+              }
+            ]
+          },
+          "then": {
+            "effect": "[[parameters('effect')]"
+          }
+        }
+      }
+    },
+    {
+      "type": "Microsoft.Authorization/policyDefinitions",
+      "apiVersion": "2023-04-01",
+      "name": "[format('{0}-require-prompt-shield-indirect-attack', parameters('namePrefix'))]",
+      "properties": {
+        "displayName": "[format('{0}: Prompt Shields indirect-attack (XPIA) filter must be blocking', parameters('displayPrefix'))]",
+        "description": "Denies or audits RAI policies that do not include a Prompt-source \"indirect_attack\" filter with enabled=true and blocking=true. Required to defend tool-using agents against payloads hidden in grounding documents, web pages, or emails.",
+        "mode": "All",
+        "metadata": "[variables('metadataCommon')]",
+        "parameters": {
+          "effect": {
+            "type": "String",
+            "allowedValues": [
+              "Audit",
+              "Deny",
+              "Disabled"
+            ],
+            "defaultValue": "Audit",
+            "metadata": {
+              "displayName": "Effect"
+            }
+          }
+        },
+        "policyRule": {
+          "if": {
+            "allOf": [
+              {
+                "field": "type",
+                "equals": "Microsoft.CognitiveServices/accounts/raiPolicies"
+              },
+              {
+                "not": {
+                  "field": "Microsoft.CognitiveServices/accounts/raiPolicies/contentFilters[*]",
+                  "where": {
+                    "allOf": [
+                      {
+                        "field": "Microsoft.CognitiveServices/accounts/raiPolicies/contentFilters[*].name",
+                        "equals": "indirect_attack"
+                      },
+                      {
+                        "field": "Microsoft.CognitiveServices/accounts/raiPolicies/contentFilters[*].source",
+                        "equals": "Prompt"
+                      },
+                      {
+                        "field": "Microsoft.CognitiveServices/accounts/raiPolicies/contentFilters[*].enabled",
+                        "equals": true
+                      },
+                      {
+                        "field": "Microsoft.CognitiveServices/accounts/raiPolicies/contentFilters[*].blocking",
+                        "equals": true
+                      }
+                    ]
+                  },
+                  "greaterOrEquals": 1
+                }
+              }
+            ]
+          },
+          "then": {
+            "effect": "[[parameters('effect')]"
+          }
+        }
+      }
+    },
+    {
+      "type": "Microsoft.Authorization/policyDefinitions",
+      "apiVersion": "2023-04-01",
+      "name": "[format('{0}-require-harmful-content-low-threshold', parameters('namePrefix'))]",
+      "properties": {
+        "displayName": "[format('{0}: Hate/Sexual/Violence/Self-harm must block at severity Low on Prompt and Completion', parameters('displayPrefix'))]",
+        "description": "Denies or audits RAI policies missing any of the four core Content Safety filters (hate, sexual, violence, selfharm) on both Prompt and Completion sources with enabled=true, blocking=true, severityThreshold=Low.",
+        "mode": "All",
+        "metadata": "[variables('metadataCommon')]",
+        "parameters": {
+          "effect": {
+            "type": "String",
+            "allowedValues": [
+              "Audit",
+              "Deny",
+              "Disabled"
+            ],
+            "defaultValue": "Audit",
+            "metadata": {
+              "displayName": "Effect"
+            }
+          }
+        },
+        "policyRule": {
+          "if": {
+            "allOf": [
+              {
+                "field": "type",
+                "equals": "Microsoft.CognitiveServices/accounts/raiPolicies"
+              },
+              {
+                "anyOf": [
+                  {
+                    "count": {
+                      "field": "Microsoft.CognitiveServices/accounts/raiPolicies/contentFilters[*]",
+                      "where": {
+                        "allOf": [
+                          {
+                            "field": "Microsoft.CognitiveServices/accounts/raiPolicies/contentFilters[*].name",
+                            "in": [
+                              "hate",
+                              "sexual",
+                              "violence",
+                              "selfharm"
+                            ]
+                          },
+                          {
+                            "field": "Microsoft.CognitiveServices/accounts/raiPolicies/contentFilters[*].source",
+                            "equals": "Prompt"
+                          },
+                          {
+                            "field": "Microsoft.CognitiveServices/accounts/raiPolicies/contentFilters[*].enabled",
+                            "equals": true
+                          },
+                          {
+                            "field": "Microsoft.CognitiveServices/accounts/raiPolicies/contentFilters[*].blocking",
+                            "equals": true
+                          },
+                          {
+                            "field": "Microsoft.CognitiveServices/accounts/raiPolicies/contentFilters[*].severityThreshold",
+                            "equals": "Low"
+                          }
+                        ]
+                      }
+                    },
+                    "less": 4
+                  },
+                  {
+                    "count": {
+                      "field": "Microsoft.CognitiveServices/accounts/raiPolicies/contentFilters[*]",
+                      "where": {
+                        "allOf": [
+                          {
+                            "field": "Microsoft.CognitiveServices/accounts/raiPolicies/contentFilters[*].name",
+                            "in": [
+                              "hate",
+                              "sexual",
+                              "violence",
+                              "selfharm"
+                            ]
+                          },
+                          {
+                            "field": "Microsoft.CognitiveServices/accounts/raiPolicies/contentFilters[*].source",
+                            "equals": "Completion"
+                          },
+                          {
+                            "field": "Microsoft.CognitiveServices/accounts/raiPolicies/contentFilters[*].enabled",
+                            "equals": true
+                          },
+                          {
+                            "field": "Microsoft.CognitiveServices/accounts/raiPolicies/contentFilters[*].blocking",
+                            "equals": true
+                          },
+                          {
+                            "field": "Microsoft.CognitiveServices/accounts/raiPolicies/contentFilters[*].severityThreshold",
+                            "equals": "Low"
+                          }
+                        ]
+                      }
+                    },
+                    "less": 4
+                  }
+                ]
+              }
+            ]
+          },
+          "then": {
+            "effect": "[[parameters('effect')]"
+          }
+        }
+      }
+    },
+    {
+      "type": "Microsoft.Authorization/policyDefinitions",
+      "apiVersion": "2023-04-01",
+      "name": "[format('{0}-require-protected-material-filters', parameters('namePrefix'))]",
+      "properties": {
+        "displayName": "[format('{0}: Protected-material (text + code) filters must be blocking on Completion', parameters('displayPrefix'))]",
+        "description": "Denies or audits RAI policies missing blocking \"protected_material_text\" and \"protected_material_code\" filters on the Completion source. These catch copyrighted content and licensed code regurgitation.",
+        "mode": "All",
+        "metadata": "[variables('metadataCommon')]",
+        "parameters": {
+          "effect": {
+            "type": "String",
+            "allowedValues": [
+              "Audit",
+              "Deny",
+              "Disabled"
+            ],
+            "defaultValue": "Audit",
+            "metadata": {
+              "displayName": "Effect"
+            }
+          }
+        },
+        "policyRule": {
+          "if": {
+            "allOf": [
+              {
+                "field": "type",
+                "equals": "Microsoft.CognitiveServices/accounts/raiPolicies"
+              },
+              {
+                "count": {
+                  "field": "Microsoft.CognitiveServices/accounts/raiPolicies/contentFilters[*]",
+                  "where": {
+                    "allOf": [
+                      {
+                        "field": "Microsoft.CognitiveServices/accounts/raiPolicies/contentFilters[*].name",
+                        "in": [
+                          "protected_material_text",
+                          "protected_material_code"
+                        ]
+                      },
+                      {
+                        "field": "Microsoft.CognitiveServices/accounts/raiPolicies/contentFilters[*].source",
+                        "equals": "Completion"
+                      },
+                      {
+                        "field": "Microsoft.CognitiveServices/accounts/raiPolicies/contentFilters[*].enabled",
+                        "equals": true
+                      },
+                      {
+                        "field": "Microsoft.CognitiveServices/accounts/raiPolicies/contentFilters[*].blocking",
+                        "equals": true
+                      }
+                    ]
+                  }
+                },
+                "less": 2
+              }
+            ]
+          },
+          "then": {
+            "effect": "[[parameters('effect')]"
+          }
+        }
+      }
+    },
+    {
+      "type": "Microsoft.Authorization/policyDefinitions",
+      "apiVersion": "2023-04-01",
+      "name": "[format('{0}-require-custom-blocklist', parameters('namePrefix'))]",
+      "properties": {
+        "displayName": "[format('{0}: RAI policies must attach a blocking custom blocklist', parameters('displayPrefix'))]",
+        "description": "Denies or audits RAI policies with no customBlocklists entry in blocking mode. Enforces the presence of an organisation-specific blocklist (e.g., PII regex: SSN, credit card, bank account) so sensitive patterns are stripped even when core filters miss them.",
+        "mode": "All",
+        "metadata": "[variables('metadataCommon')]",
+        "parameters": {
+          "effect": {
+            "type": "String",
+            "allowedValues": [
+              "Audit",
+              "Deny",
+              "Disabled"
+            ],
+            "defaultValue": "Audit",
+            "metadata": {
+              "displayName": "Effect"
+            }
+          }
+        },
+        "policyRule": {
+          "if": {
+            "allOf": [
+              {
+                "field": "type",
+                "equals": "Microsoft.CognitiveServices/accounts/raiPolicies"
+              },
+              {
+                "count": {
+                  "field": "Microsoft.CognitiveServices/accounts/raiPolicies/customBlocklists[*]",
+                  "where": {
+                    "field": "Microsoft.CognitiveServices/accounts/raiPolicies/customBlocklists[*].blocking",
+                    "equals": true
+                  }
+                },
+                "less": 1
+              }
+            ]
+          },
+          "then": {
+            "effect": "[[parameters('effect')]"
+          }
+        }
+      }
+    },
+    {
+      "type": "Microsoft.Authorization/policySetDefinitions",
+      "apiVersion": "2023-04-01",
+      "name": "[format('{0}-foundry-guardrails', parameters('namePrefix'))]",
+      "properties": {
+        "displayName": "[format('{0}: Baseline (8 controls)', parameters('displayPrefix'))]",
+        "description": "Baseline guardrail controls for Azure AI Foundry / Azure OpenAI model deployments, aligned with the Microsoft Foundry Control Plane guardrail policy wizard: RAI policy present, DefaultV2 base, Blocking mode, Prompt Shields (jailbreak + indirect attack), core Content Safety filters at severity Low, protected-material filters, and at least one custom blocklist.",
+        "metadata": "[variables('metadataCommon')]",
+        "policyType": "Custom",
+        "parameters": {
+          "defaultEffect": {
+            "type": "String",
+            "allowedValues": [
+              "Audit",
+              "Deny",
+              "Disabled"
+            ],
+            "defaultValue": "Audit",
+            "metadata": {
+              "displayName": "Default effect for every control"
+            }
+          }
+        },
+        "policyDefinitions": [
+          {
+            "policyDefinitionReferenceId": "requireRaiPolicyOnDeployment",
+            "policyDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/policyDefinitions', format('{0}-require-raipolicy-on-deployment', parameters('namePrefix')))]",
+            "parameters": {
+              "effect": {
+                "value": "[[parameters('defaultEffect')]"
+              }
+            }
+          },
+          {
+            "policyDefinitionReferenceId": "requireDefaultV2Base",
+            "policyDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/policyDefinitions', format('{0}-require-defaultv2-base', parameters('namePrefix')))]",
+            "parameters": {
+              "effect": {
+                "value": "[[parameters('defaultEffect')]"
+              }
+            }
+          },
+          {
+            "policyDefinitionReferenceId": "requireBlockingMode",
+            "policyDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/policyDefinitions', format('{0}-require-blocking-mode', parameters('namePrefix')))]",
+            "parameters": {
+              "effect": {
+                "value": "[[parameters('defaultEffect')]"
+              }
+            }
+          },
+          {
+            "policyDefinitionReferenceId": "requirePromptShieldJailbreak",
+            "policyDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/policyDefinitions', format('{0}-require-prompt-shield-jailbreak', parameters('namePrefix')))]",
+            "parameters": {
+              "effect": {
+                "value": "[[parameters('defaultEffect')]"
+              }
+            }
+          },
+          {
+            "policyDefinitionReferenceId": "requirePromptShieldIndirectAttack",
+            "policyDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/policyDefinitions', format('{0}-require-prompt-shield-indirect-attack', parameters('namePrefix')))]",
+            "parameters": {
+              "effect": {
+                "value": "[[parameters('defaultEffect')]"
+              }
+            }
+          },
+          {
+            "policyDefinitionReferenceId": "requireHarmfulContentLowThreshold",
+            "policyDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/policyDefinitions', format('{0}-require-harmful-content-low-threshold', parameters('namePrefix')))]",
+            "parameters": {
+              "effect": {
+                "value": "[[parameters('defaultEffect')]"
+              }
+            }
+          },
+          {
+            "policyDefinitionReferenceId": "requireProtectedMaterialFilters",
+            "policyDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/policyDefinitions', format('{0}-require-protected-material-filters', parameters('namePrefix')))]",
+            "parameters": {
+              "effect": {
+                "value": "[[parameters('defaultEffect')]"
+              }
+            }
+          },
+          {
+            "policyDefinitionReferenceId": "requireCustomBlocklist",
+            "policyDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/policyDefinitions', format('{0}-require-custom-blocklist', parameters('namePrefix')))]",
+            "parameters": {
+              "effect": {
+                "value": "[[parameters('defaultEffect')]"
+              }
+            }
+          }
+        ]
+      },
+      "dependsOn": [
+        "[subscriptionResourceId('Microsoft.Authorization/policyDefinitions', format('{0}-require-raipolicy-on-deployment', parameters('namePrefix')))]",
+        "[subscriptionResourceId('Microsoft.Authorization/policyDefinitions', format('{0}-require-defaultv2-base', parameters('namePrefix')))]",
+        "[subscriptionResourceId('Microsoft.Authorization/policyDefinitions', format('{0}-require-blocking-mode', parameters('namePrefix')))]",
+        "[subscriptionResourceId('Microsoft.Authorization/policyDefinitions', format('{0}-require-prompt-shield-jailbreak', parameters('namePrefix')))]",
+        "[subscriptionResourceId('Microsoft.Authorization/policyDefinitions', format('{0}-require-prompt-shield-indirect-attack', parameters('namePrefix')))]",
+        "[subscriptionResourceId('Microsoft.Authorization/policyDefinitions', format('{0}-require-harmful-content-low-threshold', parameters('namePrefix')))]",
+        "[subscriptionResourceId('Microsoft.Authorization/policyDefinitions', format('{0}-require-protected-material-filters', parameters('namePrefix')))]",
+        "[subscriptionResourceId('Microsoft.Authorization/policyDefinitions', format('{0}-require-custom-blocklist', parameters('namePrefix')))]"
+      ]
+    },
+    {
+      "condition": "[not(parameters('skipAssignment'))]",
+      "type": "Microsoft.Authorization/policyAssignments",
+      "apiVersion": "2023-04-01",
+      "name": "[format('{0}-foundry-guardrails-assign', parameters('namePrefix'))]",
+      "properties": {
+        "displayName": "[format('{0}: Baseline assignment', parameters('displayPrefix'))]",
+        "description": "Assigns the Foundry guardrail baseline initiative to the current subscription.",
+        "policyDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/policySetDefinitions', format('{0}-foundry-guardrails', parameters('namePrefix')))]",
+        "parameters": {
+          "defaultEffect": {
+            "value": "[parameters('defaultEffect')]"
+          }
+        },
+        "enforcementMode": "Default"
+      },
+      "dependsOn": [
+        "[subscriptionResourceId('Microsoft.Authorization/policySetDefinitions', format('{0}-foundry-guardrails', parameters('namePrefix')))]"
+      ]
+    }
+  ],
+  "outputs": {
+    "initiativeId": {
+      "type": "string",
+      "value": "[subscriptionResourceId('Microsoft.Authorization/policySetDefinitions', format('{0}-foundry-guardrails', parameters('namePrefix')))]"
+    },
+    "assignmentId": {
+      "type": "string",
+      "value": "[if(parameters('skipAssignment'), '', subscriptionResourceId('Microsoft.Authorization/policyAssignments', format('{0}-foundry-guardrails-assign', parameters('namePrefix'))))]"
+    },
+    "policyDefinitionIds": {
+      "type": "array",
+      "value": [
+        "[subscriptionResourceId('Microsoft.Authorization/policyDefinitions', format('{0}-require-raipolicy-on-deployment', parameters('namePrefix')))]",
+        "[subscriptionResourceId('Microsoft.Authorization/policyDefinitions', format('{0}-require-defaultv2-base', parameters('namePrefix')))]",
+        "[subscriptionResourceId('Microsoft.Authorization/policyDefinitions', format('{0}-require-blocking-mode', parameters('namePrefix')))]",
+        "[subscriptionResourceId('Microsoft.Authorization/policyDefinitions', format('{0}-require-prompt-shield-jailbreak', parameters('namePrefix')))]",
+        "[subscriptionResourceId('Microsoft.Authorization/policyDefinitions', format('{0}-require-prompt-shield-indirect-attack', parameters('namePrefix')))]",
+        "[subscriptionResourceId('Microsoft.Authorization/policyDefinitions', format('{0}-require-harmful-content-low-threshold', parameters('namePrefix')))]",
+        "[subscriptionResourceId('Microsoft.Authorization/policyDefinitions', format('{0}-require-protected-material-filters', parameters('namePrefix')))]",
+        "[subscriptionResourceId('Microsoft.Authorization/policyDefinitions', format('{0}-require-custom-blocklist', parameters('namePrefix')))]"
+      ]
+    }
+  }
+}
