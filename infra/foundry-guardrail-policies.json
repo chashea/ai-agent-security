@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.39.26.7824",
-      "templateHash": "7563981223188173630"
+      "templateHash": "12109244385265636209"
     }
   },
   "parameters": {
@@ -216,7 +216,7 @@
                 "equals": "Microsoft.CognitiveServices/accounts/raiPolicies"
               },
               {
-                "not": {
+                "count": {
                   "field": "Microsoft.CognitiveServices/accounts/raiPolicies/contentFilters[*]",
                   "where": {
                     "allOf": [
@@ -237,9 +237,9 @@
                         "equals": true
                       }
                     ]
-                  },
-                  "greaterOrEquals": 1
-                }
+                  }
+                },
+                "less": 1
               }
             ]
           },
@@ -280,7 +280,7 @@
                 "equals": "Microsoft.CognitiveServices/accounts/raiPolicies"
               },
               {
-                "not": {
+                "count": {
                   "field": "Microsoft.CognitiveServices/accounts/raiPolicies/contentFilters[*]",
                   "where": {
                     "allOf": [
@@ -301,9 +301,9 @@
                         "equals": true
                       }
                     ]
-                  },
-                  "greaterOrEquals": 1
-                }
+                  }
+                },
+                "less": 1
               }
             ]
           },

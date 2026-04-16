@@ -154,7 +154,7 @@ resource p4 'Microsoft.Authorization/policyDefinitions@2023-04-01' = {
         allOf: [
           { field: 'type', equals: 'Microsoft.CognitiveServices/accounts/raiPolicies' }
           {
-            not: {
+            count: {
               field: 'Microsoft.CognitiveServices/accounts/raiPolicies/contentFilters[*]'
               where: {
                 allOf: [
@@ -164,8 +164,8 @@ resource p4 'Microsoft.Authorization/policyDefinitions@2023-04-01' = {
                   { field: 'Microsoft.CognitiveServices/accounts/raiPolicies/contentFilters[*].blocking', equals: true }
                 ]
               }
-              greaterOrEquals: 1
             }
+            less: 1
           }
         ]
       }
@@ -196,7 +196,7 @@ resource p5 'Microsoft.Authorization/policyDefinitions@2023-04-01' = {
         allOf: [
           { field: 'type', equals: 'Microsoft.CognitiveServices/accounts/raiPolicies' }
           {
-            not: {
+            count: {
               field: 'Microsoft.CognitiveServices/accounts/raiPolicies/contentFilters[*]'
               where: {
                 allOf: [
@@ -206,8 +206,8 @@ resource p5 'Microsoft.Authorization/policyDefinitions@2023-04-01' = {
                   { field: 'Microsoft.CognitiveServices/accounts/raiPolicies/contentFilters[*].blocking', equals: true }
                 ]
               }
-              greaterOrEquals: 1
             }
+            less: 1
           }
         ]
       }
