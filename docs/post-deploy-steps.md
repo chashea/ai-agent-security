@@ -301,6 +301,19 @@ curl -s -H "Authorization: Bearer $TOKEN" \
   "https://aisec-foundry.services.ai.azure.com/api/projects/aisec-project/agents?api-version=2025-05-15-preview" \
   | jq '.data[].name'
 
+# Azure AI Search index exists, AAD auth works, and docs are populated per agent_scope
+SEARCH_TOKEN=$(az account get-access-token --resource https://search.azure.com --query accessToken -o tsv)
+curl -s -H "Authorization: Bearer $SEARCH_TOKEN" \
+  "https://aisec-search-eastus.search.windows.net/indexes/aisec-compliance-index/docs/search?api-version=2024-07-01" \
+  -H "Content-Type: application/json" \
+  -d '{"search":"*","count":true,"facets":["agent_scope"],"top":0}' | jq '.["@odata.count"], .["@search.facets"]'
+
+# Sample semantic-ranked query against a single agent_scope (HR)
+curl -s -H "Authorization: Bearer $SEARCH_TOKEN" \
+  "https://aisec-search-eastus.search.windows.net/indexes/aisec-compliance-index/docs/search?api-version=2024-07-01" \
+  -H "Content-Type: application/json" \
+  -d '{"search":"how do I request PTO","queryType":"semantic","semanticConfiguration":"aisec-semantic","filter":"agent_scope eq '\''HR-Helpdesk'\''","top":3,"select":"doc_id,title"}'
+
 # Teams apps in org catalog with current version
 pwsh -Command "Connect-MgGraph -Scopes 'AppCatalog.ReadWrite.All' -TenantId <tenantId> -NoWelcome; \
   Invoke-MgGraphRequest -Method GET -Uri 'v1.0/appCatalogs/teamsApps?\$filter=startswith(displayName,''AISec'')&\$expand=appDefinitions' \

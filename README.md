@@ -9,6 +9,7 @@ Secure AI agents deployed from Azure AI Foundry with sensitivity labels and adja
 Deploy AI agents from Azure AI Foundry and automatically wrap them with:
 
 - **Sensitivity labels** — AI-Accessible, AI-Protected, AI-Restricted, Executives-Only, with AI Search enforcement via the index managed identity
+- **Knowledge bases** — Per-agent vector stores (file_search) **plus** a shared Azure AI Search index (`aisec-compliance-index`) with hybrid (keyword + HNSW vector) + semantic ranker, populated from `scripts/demo_docs/` with per-agent `agent_scope` filtering
 - **Guardrails** — Custom RAI policy with tightened content filters (severity Low), jailbreak/indirect attack detection, PII annotation, and custom PII blocklists (SSN, credit card, bank account patterns)
 - **Agent identity** — Managed identity and auto-derived RBAC for agents
 - **Conditional Access** — MFA and risk-based access policies for agent principals (report-only)
@@ -230,8 +231,10 @@ The Foundry workload uses a three-layer architecture:
   model deployments, and project creation (direct ARM REST at
   `api-version=2026-01-15-preview`), plus Teams packaging and catalog publishing
 - **Python SDK** (`scripts/*.py`) for agent CRUD, project connections,
-  knowledge base / vector stores, post-deploy evaluations, and AI red teaming
-- **Bicep** (`infra/`) for eval infrastructure, Bot Services, and Defender posture
+  knowledge base / vector stores, AI Search index population
+  (`foundry_search_index.py`), post-deploy evaluations, and AI red teaming
+- **Bicep** (`infra/`) for eval infrastructure (AI Search with AAD-or-key auth
+  + semantic ranker enabled), Bot Services, and Defender posture
 
 Deployment order (dependency-driven):
 

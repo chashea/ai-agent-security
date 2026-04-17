@@ -439,3 +439,88 @@ existing resources and only create what's missing.
 **ConditionalAccess fails.**
 Agents, RBAC, groups, and labels are in place but CA policies are absent.
 Re-run the full deploy — ConditionalAccess picks up where it left off.
+
+## `azure_ai_search` tool returns zero results in the agent UX
+
+**Symptom.** An agent that declares `azure_ai_search` in `config.json`
+(e.g., HR-Helpdesk) responds with "I couldn't find any information"
+to questions that demo docs in `scripts/demo_docs/` clearly answer.
+Foundry surfaces no error — the tool just returns an empty result set.
+
+**Root cause (most common).** The index referenced by the tool
+(`aisec-compliance-index`) does not exist on the search service, or
+exists but is empty. Until commit `a1b2af1`, the deploy created the
+search **service** via Bicep but never created or populated the
+**index** — a real silent-failure gap.
+
+**Fix.** Run a fresh deploy on `main` or later. `Deploy-Foundry`
+Step 3b (`Initialize-FoundrySearchIndex` in `modules/Foundry.psm1`)
+calls `python3.12 scripts/foundry_search_index.py --action populate`
+which creates the index with hybrid + semantic config and uploads
+the demo corpus tagged with an `agent_scope` filterable field.
+
+**Verify.** Use the facet curl in
+[`docs/post-deploy-steps.md#verification`](post-deploy-steps.md#verification).
+Expect a count of 21 documents (3 per agent_scope × 7 agents).
+
+## AI Search index population fails with HTTP 403 Forbidden
+
+**Symptom.** `foundry_search_index.py` exits non-zero with
+`403 Forbidden` on `PUT /indexes/aisec-compliance-index` or
+`POST /docs/index`.
+
+**Root cause.** The deploying identity is missing `Search Service
+Contributor` (create/update index) or `Search Index Data Contributor`
+(upload docs) on the search service.
+
+**Fix.** `Deploy-FoundryBicep` grants both roles to the signed-in user
+right after the eval-infra Bicep deploys. If you ran an old version
+of the deploy or the role assignment failed, grant manually:
+
+```bash
+USER_ID=$(az ad signed-in-user show --query id -o tsv)
+SEARCH_ID=$(az search service show -n aisec-search-eastus -g rg-ai-agent-security --query id -o tsv)
+az role assignment create --assignee-object-id $USER_ID --assignee-principal-type User \
+  --role "Search Service Contributor"     --scope $SEARCH_ID
+az role assignment create --assignee-object-id $USER_ID --assignee-principal-type User \
+  --role "Search Index Data Contributor"  --scope $SEARCH_ID
+```
+
+Wait ~30s for AAD eventual consistency, then re-run the deploy.
+
+## AI Search index population stalls on embedding 429s
+
+**Symptom.** `foundry_search_index.py` logs many
+`429 Too Many Requests` retries on the embeddings endpoint
+(`text-embedding-3-small`). The script eventually succeeds but
+takes 5-10 minutes for ~20 docs.
+
+**Root cause.** New Foundry accounts get a low default TPM quota
+(~1K) on `text-embedding-3-small`. The retry loop with exponential
+backoff (8 attempts) absorbs the throttling, but the wait is
+visible in deploy logs.
+
+**Fix (optional).** Foundry portal → Models + endpoints →
+`text-embedding-3-small` → Edit → raise TPM. Not required for
+correctness — the populator is idempotent (`mergeOrUpload` on
+stable doc IDs) and can be re-run safely.
+
+## AI Search service rejects bearer token with HTTP 401
+
+**Symptom.** `foundry_search_index.py` fails with
+`401 Unauthorized` on the very first request, before any 429s.
+
+**Root cause.** The search service has `authOptions.aadOrApiKey`
+disabled (key-only auth). The Bicep in
+`infra/foundry-eval-infra.bicep` enables `aadOrApiKey` with
+`http401WithBearerChallenge` — older Bicep deploys may have left
+the service in key-only mode.
+
+**Fix.**
+
+```bash
+az search service update -n aisec-search-eastus -g rg-ai-agent-security \
+  --aad-auth-failure-mode http401 --auth-options aadOrApiKey
+```
+
+Then re-run the deploy (or just `python3.12 scripts/foundry_search_index.py --action populate`).

@@ -65,9 +65,11 @@ The Foundry workload uses three layers:
   at `api-version=2026-01-15-preview`). Also handles Bot Services wiring, Teams
   package generation, and Teams catalog publishing.
 - **Python SDK** (`scripts/foundry_agents.py`, `foundry_tools.py`,
-  `foundry_knowledge.py`, `foundry_evals.py`) — Agent CRUD via
-  `azure-ai-projects`, project connections, knowledge base / vector stores,
-  post-deploy evaluations pipeline.
+  `foundry_knowledge.py`, `foundry_search_index.py`, `foundry_evals.py`,
+  `foundry_redteam.py`) — Agent CRUD via `azure-ai-projects`, project
+  connections, file_search vector stores, Azure AI Search index lifecycle
+  (`aisec-compliance-index`, hybrid + semantic, `agent_scope` filter),
+  post-deploy evaluations pipeline, AI red teaming.
 - **Bicep** (`infra/`) — Eval infrastructure (`foundry-eval-infra.bicep`:
   AI Search, App Insights, Log Analytics), Bot Services (`bot-services.bicep`,
   `bot-per-agent.bicep`), and Defender for Cloud posture (`defender-posture.bicep`).
