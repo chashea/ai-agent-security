@@ -434,39 +434,63 @@ def run_cloud_scan(config: dict) -> dict:
                     )
                     log.info("Created taxonomy: %s", taxonomy.id)
 
-                # Step 3: Create run with attack strategies
-                item_gen_params = {
-                    "type": "red_team_taxonomy",
-                    "attack_strategies": attack_strats if attack_strats else ["Flip", "Base64", "Jailbreak"],
-                    "num_turns": num_turns,
-                }
-                if taxonomy:
-                    item_gen_params["source"] = {"type": "file_id", "id": taxonomy.id}
+                # Step 3: Create runs with attack strategies.
+                # MultiTurn/Crescendo must be submitted as the ONLY strategy in a run
+                # (Foundry rejects mixing them with other strategies with 400).
+                incompatible = {"MultiTurn", "Multiturn", "Crescendo"}
+                base_strats = attack_strats if attack_strats else ["Flip", "Base64", "Jailbreak"]
+                mixed_strats = [s for s in base_strats if s not in incompatible]
+                solo_strats = [s for s in base_strats if s in incompatible]
 
-                eval_run = client.evals.runs.create(
-                    eval_id=red_team.id,
-                    name=f"RedTeam-Run-{agent_name}",
-                    data_source={
-                        "type": "azure_ai_red_team",
-                        "item_generation_params": item_gen_params,
-                        "target": target.as_dict(),
-                    },
-                )
-                log.info("Created run: %s (status: %s)", eval_run.id, eval_run.status)
+                run_specs = []
+                if mixed_strats:
+                    run_specs.append(("mixed", mixed_strats))
+                for s in solo_strats:
+                    run_specs.append((s.lower(), [s]))
 
-                # Step 4: Poll for completion
-                for _ in range(120):
-                    run = client.evals.runs.retrieve(run_id=eval_run.id, eval_id=red_team.id)
-                    log.info("Run %s status: %s", eval_run.id, run.status)
-                    if run.status in ("completed", "failed", "canceled"):
-                        break
-                    time.sleep(10)
+                created_runs = []
+                for suffix, strats in run_specs:
+                    item_gen_params = {
+                        "type": "red_team_taxonomy",
+                        "attack_strategies": strats,
+                        "num_turns": num_turns,
+                    }
+                    if taxonomy:
+                        item_gen_params["source"] = {"type": "file_id", "id": taxonomy.id}
 
-                # Step 5: Collect output items
+                    try:
+                        eval_run = client.evals.runs.create(
+                            eval_id=red_team.id,
+                            name=f"RedTeam-Run-{agent_name}-{suffix}",
+                            data_source={
+                                "type": "azure_ai_red_team",
+                                "item_generation_params": item_gen_params,
+                                "target": target.as_dict(),
+                            },
+                        )
+                        log.info("Created run: %s (%s, status: %s)", eval_run.id, suffix, eval_run.status)
+                        created_runs.append(eval_run)
+                    except Exception as run_exc:
+                        log.warning("Run '%s' failed to create for %s: %s", suffix, agent_name, run_exc)
+
+                if not created_runs:
+                    raise RuntimeError("no runs created")
+
+                # Step 4: Skip long polling — runs execute async in cloud and appear in portal.
+                # Do a single retrieve on the last run to capture initial status.
+                run = None
+                last_run = created_runs[-1]
+                try:
+                    run = client.evals.runs.retrieve(run_id=last_run.id, eval_id=red_team.id)
+                    log.info("Run %s initial status: %s", last_run.id, run.status)
+                except Exception as poll_exc:
+                    log.warning("Could not retrieve run status: %s", poll_exc)
+
+                # Step 5: Collect output items only if already completed (rare on create)
                 output_items = []
-                if run.status == "completed":
+                if run and run.status == "completed":
                     items = list(client.evals.runs.output_items.list(
-                        run_id=eval_run.id,
+                        run_id=last_run.id,
                         eval_id=red_team.id,
                     ))
                     for item in items:
@@ -481,8 +505,8 @@ def run_cloud_scan(config: dict) -> dict:
                     "agentName": agent_name,
                     "agentId": agent_id,
                     "redTeamId": red_team.id,
-                    "runId": eval_run.id,
-                    "status": run.status,
+                    "runIds": [r.id for r in created_runs],
+                    "status": run.status if run else "unknown",
                     "outputItemCount": len(output_items),
                     "outputItems": output_items[:50],
                 })
