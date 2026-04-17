@@ -329,6 +329,13 @@ def build_tool_definitions(
             conn_id = ""
             if connection_ids and "aiSearch" in connection_ids:
                 conn_id = connection_ids["aiSearch"].get("id", "")
+            if not conn_id:
+                log.warning(
+                    "azure_ai_search tool skipped: no AI Search project connection "
+                    "available (the Search service may not have provisioned — check "
+                    "eastus2 capacity / foundry-eval-infra.bicep output)."
+                )
+                continue
             index_name = tool.get("indexName", "aisec-compliance-index")
             definitions.append({
                 "type": "azure_ai_search",
