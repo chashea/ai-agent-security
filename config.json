@@ -190,6 +190,29 @@
         ],
         "numTurns": 5
       },
+      "orchestrator": {
+        "enabled": true,
+        "name": "Orchestrator",
+        "model": "gpt-4o",
+        "description": "Routes each request to the most appropriate specialist agent.",
+        "instructions": "You are the AISec routing orchestrator. For each user request, identify the single best-fit specialist among the connected agents (HR, Finance, IT, Sales, Kusto, Security-Triage, Defender-IR, Purview-Governance) and delegate via the matching connected_agent tool. If a specific user or account is mentioned, call the get_user_risk_score function first to pull their risk context, then include that score when delegating. Do not answer domain questions yourself — always delegate.",
+        "functionTools": [
+          {
+            "name": "get_user_risk_score",
+            "description": "Look up the identity risk score for a given user principal name (UPN). Returns a composite 0-100 risk score drawn from Entra ID Protection, Defender, and Purview Insider Risk signals.",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "upn": {
+                  "type": "string",
+                  "description": "User principal name, e.g. alice@contoso.com"
+                }
+              },
+              "required": ["upn"]
+            }
+          }
+        ]
+      },
       "agents": [
         {
           "name": "HR-Helpdesk",
