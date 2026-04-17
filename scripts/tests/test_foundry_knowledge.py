@@ -143,15 +143,17 @@ class TestCreateVectorStore:
 
 
 class TestUploadKnowledgeBase:
+    @patch("foundry_knowledge.find_vector_store_by_name")
     @patch("foundry_knowledge.create_vector_store")
     @patch("foundry_knowledge.upload_file")
     @patch("foundry_knowledge.os.path.exists")
     @patch("foundry_knowledge.DefaultAzureCredential")
-    def test_full_upload_flow(self, mock_cred, mock_exists, mock_upload, mock_vs, base_config):
+    def test_full_upload_flow(self, mock_cred, mock_exists, mock_upload, mock_vs, mock_find, base_config):
         mock_cred.return_value.get_token.return_value = MagicMock(token="fake-token")
         mock_exists.return_value = True
         mock_upload.side_effect = ["file-id-1", "file-id-2"]
         mock_vs.return_value = "vs-hr-new123"
+        mock_find.return_value = None
 
         result = upload_knowledge_base(base_config)
 
@@ -163,11 +165,13 @@ class TestUploadKnowledgeBase:
         assert call_args[0][3] == "AISec-HR-Helpdesk-knowledge"
         assert call_args[0][4] == ["file-id-1", "file-id-2"]
 
+    @patch("foundry_knowledge.find_vector_store_by_name")
     @patch("foundry_knowledge.os.path.exists")
     @patch("foundry_knowledge.DefaultAzureCredential")
-    def test_missing_docs_skipped(self, mock_cred, mock_exists, base_config, caplog):
+    def test_missing_docs_skipped(self, mock_cred, mock_exists, mock_find, base_config, caplog):
         mock_cred.return_value.get_token.return_value = MagicMock(token="fake-token")
         mock_exists.return_value = False
+        mock_find.return_value = None
 
         result = upload_knowledge_base(base_config)
 
