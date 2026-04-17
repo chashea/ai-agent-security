@@ -27,7 +27,7 @@ so `disableLocalAuth: false` sticks, and PUT with the full body:
 ```json
 {
   "kind": "AIServices",
-  "location": "eastus",
+  "location": "eastus2",
   "identity": { "type": "SystemAssigned" },
   "properties": {
     "description": "...",

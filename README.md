@@ -87,7 +87,7 @@ az policy exemption create \
 
 ### Region
 
-Foundry core resources are deployed to `eastus` by default (set via
+Foundry core resources are deployed to `eastus2` by default (set via
 `workloads.foundry.location` in `config.json`). Other regions may hit
 capacity limits or project-RP issues.
 
