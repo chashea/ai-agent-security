@@ -303,30 +303,50 @@ function Deploy-FoundryBicep {
                 --subscription $subscriptionId `
                 --output json 2>&1
             if ($LASTEXITCODE -eq 0) {
-                Write-LabLog -Message "Guardrails deployed: policy=$policyName (severity=Low, mode=Blocking)" -Level Success
+                Write-LabLog -Message "Guardrails deployed: policy=$policyName (severity=Low, mode=Blocking) + balanced + permissive" -Level Success
 
-                $blocklistItems = @(
-                    @{ name = 'ssn-pattern';         pattern = '\b\d{3}-\d{2}-\d{4}\b'; isRegex = $true }
-                    @{ name = 'credit-card-pattern';  pattern = '\b(?:4\d{3}|5[1-5]\d{2}|3[47]\d{2}|6(?:011|5\d{2}))[-\s]?\d{4}[-\s]?\d{4}[-\s]?\d{3,4}\b'; isRegex = $true }
-                    @{ name = 'bank-account-keyword'; pattern = 'my (bank|routing) (account|number) is'; isRegex = $true }
+                $blocklistGroups = @(
+                    @{ name = $blocklistN; items = @(
+                        @{ name = 'ssn-pattern';         pattern = '\b\d{3}-\d{2}-\d{4}\b'; isRegex = $true }
+                        @{ name = 'credit-card-pattern';  pattern = '\b(?:4\d{3}|5[1-5]\d{2}|3[47]\d{2}|6(?:011|5\d{2}))[-\s]?\d{4}[-\s]?\d{4}[-\s]?\d{3,4}\b'; isRegex = $true }
+                        @{ name = 'bank-account-keyword'; pattern = 'my (bank|routing) (account|number) is'; isRegex = $true }
+                    )}
+                    @{ name = 'aisec-secrets-keywords'; items = @(
+                        @{ name = 'aws-access-key';      pattern = '\bAKIA[0-9A-Z]{16}\b'; isRegex = $true }
+                        @{ name = 'azure-storage-key';   pattern = '[A-Za-z0-9+/]{86}=='; isRegex = $true }
+                        @{ name = 'github-token';        pattern = '\bgh[ps]_[A-Za-z0-9]{36,}\b'; isRegex = $true }
+                        @{ name = 'private-key-header';  pattern = '-----BEGIN (RSA |EC |OPENSSH |)PRIVATE KEY-----'; isRegex = $true }
+                        @{ name = 'codename-redwing';    pattern = 'project redwing'; isRegex = $false }
+                        @{ name = 'codename-skyhook';    pattern = 'operation skyhook'; isRegex = $false }
+                    )}
+                    @{ name = 'aisec-competitor-names'; items = @(
+                        @{ name = 'competitor-acme';     pattern = 'AcmeCloud'; isRegex = $false }
+                        @{ name = 'competitor-globex';   pattern = 'Globex AI'; isRegex = $false }
+                        @{ name = 'competitor-initech';  pattern = 'Initech Insights'; isRegex = $false }
+                    )}
                 )
                 $armToken = Get-FoundryArmToken
-                $blocklistBasePath = "$($script:ArmBase)/subscriptions/$subscriptionId/resourceGroups/$resourceGroup/providers/Microsoft.CognitiveServices/accounts/$accountName/raiBlocklists/$blocklistN/raiBlocklistItems"
-                foreach ($item in $blocklistItems) {
-                    $itemUri = "$blocklistBasePath/$($item.name)?api-version=2024-10-01"
-                    $itemBody = @{ properties = @{ pattern = $item.pattern; isRegex = $item.isRegex } } | ConvertTo-Json -Depth 5 -Compress
-                    try {
-                        Invoke-ArmPut -Uri $itemUri -Body $itemBody -Token $armToken | Out-Null
-                        Write-LabLog -Message "Blocklist item '$($item.name)' created." -Level Info
-                    }
-                    catch {
-                        Write-LabLog -Message "Blocklist item '$($item.name)' failed: $_" -Level Warning
+                foreach ($group in $blocklistGroups) {
+                    $groupName = $group.name
+                    $blocklistBasePath = "$($script:ArmBase)/subscriptions/$subscriptionId/resourceGroups/$resourceGroup/providers/Microsoft.CognitiveServices/accounts/$accountName/raiBlocklists/$groupName/raiBlocklistItems"
+                    foreach ($item in $group.items) {
+                        $itemUri = "$blocklistBasePath/$($item.name)?api-version=2024-10-01"
+                        $itemBody = @{ properties = @{ pattern = $item.pattern; isRegex = $item.isRegex } } | ConvertTo-Json -Depth 5 -Compress
+                        try {
+                            Invoke-ArmPut -Uri $itemUri -Body $itemBody -Token $armToken | Out-Null
+                            Write-LabLog -Message "Blocklist item '$groupName/$($item.name)' created." -Level Info
+                        }
+                        catch {
+                            Write-LabLog -Message "Blocklist item '$groupName/$($item.name)' failed: $_" -Level Warning
+                        }
                     }
                 }
 
                 $guardrailsResult = @{
-                    policyName    = $policyName
-                    blocklistName = $blocklistN
+                    policyName             = $policyName
+                    blocklistName          = $blocklistN
+                    additionalPolicies     = @('aisec-balanced', 'aisec-permissive')
+                    additionalBlocklists   = @('aisec-secrets-keywords', 'aisec-competitor-names')
                 }
             }
             else {
