@@ -331,6 +331,12 @@ function Deploy-FoundryBicep {
                     $blocklistBasePath = "$($script:ArmBase)/subscriptions/$subscriptionId/resourceGroups/$resourceGroup/providers/Microsoft.CognitiveServices/accounts/$accountName/raiBlocklists/$groupName/raiBlocklistItems"
                     foreach ($item in $group.items) {
                         $itemUri = "$blocklistBasePath/$($item.name)?api-version=2024-10-01"
+                        $existingItem = $null
+                        try { $existingItem = Invoke-ArmGet -Uri $itemUri -Token $armToken } catch { $existingItem = $null }
+                        if ($existingItem) {
+                            Write-LabLog -Message "Blocklist item '$groupName/$($item.name)' already exists." -Level Info
+                            continue
+                        }
                         $itemBody = @{ properties = @{ pattern = $item.pattern; isRegex = $item.isRegex } } | ConvertTo-Json -Depth 5 -Compress
                         try {
                             Invoke-ArmPut -Uri $itemUri -Body $itemBody -Token $armToken | Out-Null

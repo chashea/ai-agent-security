@@ -191,6 +191,33 @@ def create_vector_store(
     return None
 
 
+def find_vector_store_by_name(
+    project_endpoint: str, data_token: str, api_version: str, name: str
+) -> str | None:
+    """Return the ID of an existing vector store with the given name, or None.
+
+    Foundry's ``/vector_stores`` endpoint allows multiple stores with the same
+    name (each gets a unique ``vs_*`` ID). Without this check, every re-run of
+    ``upload`` accumulates a duplicate store, inflating storage cost and
+    cluttering the portal. We return the newest match so a retry after a
+    partially-failed previous run still finds the intended store.
+    """
+    url = f"{project_endpoint}/vector_stores?api-version={api_version}&limit=100"
+    try:
+        resp = _retry_request("GET", url, headers=_data_headers(data_token))
+    except Exception as exc:
+        log.warning("Vector store list failed — assuming none exist: %s", exc)
+        return None
+    if resp.status_code != 200:
+        return None
+    stores = resp.json().get("data", [])
+    matches = [s for s in stores if s.get("name") == name]
+    if not matches:
+        return None
+    matches.sort(key=lambda s: s.get("created_at", 0), reverse=True)
+    return matches[0].get("id")
+
+
 def delete_vector_store(
     project_endpoint: str, data_token: str, api_version: str, vs_id: str
 ) -> bool:
@@ -224,6 +251,20 @@ def upload_knowledge_base(config: dict) -> dict:
     vector_stores = {}
 
     for agent_name, doc_files in knowledge_base.items():
+        vs_name = f"{prefix}-{agent_name}-knowledge"
+
+        existing_id = find_vector_store_by_name(
+            project_endpoint, data_token, api_version, vs_name
+        )
+        if existing_id:
+            log.info(
+                "Vector store already exists: %s -> %s (skipping upload)",
+                vs_name,
+                existing_id,
+            )
+            vector_stores[agent_name] = existing_id
+            continue
+
         log.info("Uploading knowledge base for agent: %s", agent_name)
 
         # Upload each document
@@ -241,8 +282,6 @@ def upload_knowledge_base(config: dict) -> dict:
             log.warning("No files uploaded for agent: %s", agent_name)
             continue
 
-        # Create vector store
-        vs_name = f"{prefix}-{agent_name}-knowledge"
         vs_id = create_vector_store(
             project_endpoint, data_token, api_version, vs_name, file_ids
         )

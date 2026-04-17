@@ -160,6 +160,30 @@ function Deploy-Foundry {
         }
     }
 
+    # Deploy built-in Azure AI governance policies (security baseline, NIST AI RMF,
+    # EU AI Act). Assignments live at subscription scope so they surface in
+    # Compliance blade of Defender for Cloud.
+    $assignPolicies = if ($fw.PSObject.Properties['assignBuiltInPolicies']) {
+        [bool]$fw.assignBuiltInPolicies
+    } else { $true }
+    if ($assignPolicies) {
+        $policyBicep = Join-Path $PSScriptRoot '..' 'infra' 'foundry-builtin-policies.bicep'
+        if (Test-Path $policyBicep) {
+            Write-LabLog -Message 'Assigning built-in AI governance policies (security baseline, NIST AI RMF, EU AI Act)' -Level Info
+            az deployment sub create `
+                --location $([string]$fw.location) `
+                --template-file $policyBicep `
+                --subscription $subscriptionId `
+                --output none 2>&1 | Out-Null
+            if ($LASTEXITCODE -eq 0) {
+                Write-LabLog -Message 'Built-in AI policy assignments applied.' -Level Success
+            }
+            else {
+                Write-LabLog -Message 'Built-in AI policy assignment failed — continuing (non-fatal).' -Level Warning
+            }
+        }
+    }
+
     # Enable Purview Data Security on the Foundry subscription (prerequisite for
     # Purview policies to see Foundry interactions). See
     # docs/foundry-purview-integration.md §1.
@@ -281,6 +305,15 @@ function Deploy-Foundry {
         if ($fw.connections.PSObject.Properties['sharePoint']) {
             $connInput['connections']['sharePoint'] = @{
                 siteUrl = [string]$fw.connections.sharePoint.siteUrl
+            }
+        }
+        if ($fw.connections.PSObject.Properties['appInsights']) {
+            $aiCfg = $fw.connections.appInsights
+            $aiPayload = @{}
+            if ($aiCfg.PSObject.Properties['resourceId']) { $aiPayload['resourceId'] = [string]$aiCfg.resourceId }
+            if ($aiCfg.PSObject.Properties['connectionString']) { $aiPayload['connectionString'] = [string]$aiCfg.connectionString }
+            if ($aiPayload.Count -gt 0) {
+                $connInput['connections']['appInsights'] = $aiPayload
             }
         }
 
@@ -550,9 +583,17 @@ function Deploy-Foundry {
 
     # ── Step 8: AI Red Teaming ───────────────────────────────────────────────
     if ($fw.PSObject.Properties['redTeaming'] -and $fw.redTeaming -and $fw.redTeaming.enabled -eq $true) {
-        $rtMode = if ($fw.redTeaming.PSObject.Properties['mode']) { [string]$fw.redTeaming.mode } else { 'local' }
-        $rtAction = if ($rtMode -eq 'cloud') { 'cloud-scan' } else { 'scan' }
-        Write-LabStep -StepName 'AI Red Teaming' -Description "Running AI Red Teaming Agent ($rtMode mode) against deployed agents"
+        $rtModeSet = $fw.redTeaming.PSObject.Properties['mode'] -and -not [string]::IsNullOrWhiteSpace([string]$fw.redTeaming.mode)
+        $rtMode = if ($rtModeSet) { [string]$fw.redTeaming.mode } else { 'local' }
+        if (-not $rtModeSet) {
+            Write-LabLog -Message "redTeaming.mode not set in config — defaulting to 'local'. Set workloads.foundry.redTeaming.mode to 'cloud' for managed Foundry red-team runs." -Level Warning
+        }
+        if ($rtMode -notin @('cloud', 'local')) {
+            Write-LabLog -Message "redTeaming.mode '$rtMode' is not recognized — must be 'cloud' or 'local'. Skipping red-team step." -Level Warning
+        }
+        else {
+            $rtAction = if ($rtMode -eq 'cloud') { 'cloud-scan' } else { 'scan' }
+            Write-LabStep -StepName 'AI Red Teaming' -Description "Running AI Red Teaming Agent ($rtMode mode) against deployed agents"
 
         $rtInput = [ordered]@{} + $pythonBase
         $rtInput['agentApiVersion'] = $script:AgentApiVersion
@@ -579,6 +620,7 @@ function Deploy-Foundry {
             Write-LabLog -Message 'AI Red Teaming complete.' -Level Success
         }
         catch { Write-LabLog -Message "Red Teaming error: $($_.Exception.Message)" -Level Warning }
+        }
     }
 
     return $manifest

@@ -311,6 +311,55 @@ def setup_connections(config: dict) -> dict:
             if conn:
                 result["sharePoint"] = conn
 
+    # Application Insights connection — enables Foundry Tracing in the portal
+    # and ships agent-run OTel spans to App Insights / Azure Monitor.
+    # Foundry rejects ``authType: AAD`` for AppInsights — must use ApiKey with
+    # the full connection string. We auto-derive the connection string from
+    # the component via ARM so the caller only needs to set the resourceId.
+    if "appInsights" in connections_cfg:
+        ai_cfg = connections_cfg["appInsights"]
+        ai_resource_id = ai_cfg.get("resourceId")
+        ai_conn_string = ai_cfg.get("connectionString")
+        if ai_resource_id and not ai_conn_string:
+            lookup_url = (
+                f"{arm_base}{ai_resource_id}?api-version=2020-02-02"
+            )
+            lookup_resp = _retry_request(
+                "GET", lookup_url, headers=_arm_headers(arm_token)
+            )
+            if lookup_resp.status_code == 200:
+                ai_conn_string = (
+                    lookup_resp.json().get("properties", {}).get("ConnectionString")
+                )
+            else:
+                log.warning(
+                    "AppInsights resource lookup failed (HTTP %d): %s",
+                    lookup_resp.status_code,
+                    lookup_resp.text,
+                )
+        if not ai_resource_id or not ai_conn_string:
+            log.warning(
+                "AppInsights connection skipped: appInsights.resourceId "
+                "(or explicit connectionString) is required."
+            )
+        else:
+            conn = create_connection(
+                arm_base=arm_base,
+                arm_token=arm_token,
+                arm_api_version=arm_api_version,
+                subscription_id=subscription_id,
+                resource_group=resource_group,
+                account_name=account_name,
+                project_name=project_name,
+                connection_name=f"{prefix}-appinsights",
+                connection_type="AppInsights",
+                target=ai_resource_id,
+                credentials={"key": ai_conn_string},
+                metadata={"ApplicationInsightsConnectionString": ai_conn_string},
+            )
+            if conn:
+                result["appInsights"] = conn
+
     return {"connections": result}
 
 
