@@ -775,7 +775,7 @@
       ]
     },
     "sensitivityLabels": {
-      "enabled": true,
+      "enabled": false,
       "labels": [
         {
           "name": "Confidential",
