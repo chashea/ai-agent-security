@@ -212,6 +212,31 @@ def setup_connections(config: dict) -> dict:
         if resource_id:
             bing_metadata["ResourceId"] = resource_id
         bing_conn_target = resource_id or bing_endpoint
+
+        # GroundingWithBingSearch connections require ApiKey authType (AAD is rejected).
+        # Prefer an explicit apiKey from config; otherwise fetch via listKeys on the
+        # Microsoft.Bing/accounts resource when we have a resourceId.
+        bing_api_key = bing.get("apiKey")
+        if not bing_api_key and resource_id:
+            keys_url = (
+                f"{arm_base}{resource_id}/listKeys?api-version=2020-06-10"
+            )
+            try:
+                keys_resp = _retry_request("POST", keys_url, headers=_arm_headers(arm_token))
+                if keys_resp.status_code < 400:
+                    keys_json = keys_resp.json()
+                    bing_api_key = keys_json.get("key1") or keys_json.get("key2")
+                else:
+                    log.warning(
+                        "Bing listKeys failed (HTTP %d): %s",
+                        keys_resp.status_code,
+                        keys_resp.text,
+                    )
+            except Exception as exc:  # noqa: BLE001
+                log.warning("Bing listKeys error: %s", exc)
+
+        bing_credentials = {"key": bing_api_key} if bing_api_key else None
+
         if bing_conn_target:
             conn = create_connection(
                 arm_base=arm_base,
@@ -224,6 +249,7 @@ def setup_connections(config: dict) -> dict:
                 connection_name=f"{prefix}-bing-grounding",
                 connection_type="GroundingWithBingSearch",
                 target=bing_conn_target,
+                credentials=bing_credentials,
                 metadata=bing_metadata or None,
             )
             if conn:
