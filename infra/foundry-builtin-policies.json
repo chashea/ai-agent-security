@@ -1,0 +1,163 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2018-05-01/subscriptionDeploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "metadata": {
+    "_generator": {
+      "name": "bicep",
+      "version": "0.39.26.7824",
+      "templateHash": "1515719189717261516"
+    }
+  },
+  "parameters": {
+    "namePrefix": {
+      "type": "string",
+      "defaultValue": "aisec",
+      "metadata": {
+        "description": "Prefix for assignment names."
+      }
+    },
+    "displayPrefix": {
+      "type": "string",
+      "defaultValue": "AISec Foundry Compliance",
+      "metadata": {
+        "description": "Display-name prefix shown in the portal."
+      }
+    }
+  },
+  "variables": {
+    "metadataCommon": {
+      "category": "Microsoft Foundry",
+      "version": "1.0.0",
+      "source": "github.com/chashea/ai-agent-security/infra/foundry-builtin-policies.bicep"
+    },
+    "pDiagnosticLogs": "[tenantResourceId('Microsoft.Authorization/policyDefinitions', '1b4d1c4e-934c-4703-944c-27c82c06bebb')]",
+    "pRestrictNetwork": "[tenantResourceId('Microsoft.Authorization/policyDefinitions', '037eea7a-bd0a-46c5-9a66-03aea78705d3')]",
+    "pDisableLocalKeys": "[tenantResourceId('Microsoft.Authorization/policyDefinitions', '71ef260a-8f18-47b7-abcb-62d0673d94dc')]",
+    "pCmkEncryption": "[tenantResourceId('Microsoft.Authorization/policyDefinitions', '67121cc7-ff39-4ab8-b7e3-95b84dab487d')]",
+    "pDefenderForAi": "[tenantResourceId('Microsoft.Authorization/policyDefinitions', 'c2c0c6d8-007b-4a48-8d9b-3539bddd8e87')]",
+    "pPrivateLink": "[tenantResourceId('Microsoft.Authorization/policyDefinitions', 'd6759c02-b87f-42b7-892e-71b3f471d782')]"
+  },
+  "resources": [
+    {
+      "type": "Microsoft.Authorization/policySetDefinitions",
+      "apiVersion": "2023-04-01",
+      "name": "[format('{0}-foundry-ai-security-baseline', parameters('namePrefix'))]",
+      "properties": {
+        "displayName": "[format('{0}: Azure AI security baseline (6 controls)', parameters('displayPrefix'))]",
+        "description": "Microsoft built-in security controls for Azure AI Services / Foundry accounts: diagnostic logging, network restriction, local key disablement, CMK encryption, Defender for AI Services, and Private Link.",
+        "metadata": "[variables('metadataCommon')]",
+        "policyType": "Custom",
+        "policyDefinitions": [
+          {
+            "policyDefinitionReferenceId": "diagnosticLogsAi",
+            "policyDefinitionId": "[variables('pDiagnosticLogs')]",
+            "parameters": {
+              "effect": {
+                "value": "AuditIfNotExists"
+              }
+            }
+          },
+          {
+            "policyDefinitionReferenceId": "restrictNetworkAi",
+            "policyDefinitionId": "[variables('pRestrictNetwork')]",
+            "parameters": {
+              "effect": {
+                "value": "Audit"
+              }
+            }
+          },
+          {
+            "policyDefinitionReferenceId": "disableLocalKeysAi",
+            "policyDefinitionId": "[variables('pDisableLocalKeys')]",
+            "parameters": {
+              "effect": {
+                "value": "Audit"
+              }
+            }
+          },
+          {
+            "policyDefinitionReferenceId": "cmkEncryptionAi",
+            "policyDefinitionId": "[variables('pCmkEncryption')]",
+            "parameters": {
+              "effect": {
+                "value": "Audit"
+              }
+            }
+          },
+          {
+            "policyDefinitionReferenceId": "defenderForAi",
+            "policyDefinitionId": "[variables('pDefenderForAi')]",
+            "parameters": {
+              "effect": {
+                "value": "AuditIfNotExists"
+              }
+            }
+          },
+          {
+            "policyDefinitionReferenceId": "privateLinkAi",
+            "policyDefinitionId": "[variables('pPrivateLink')]",
+            "parameters": {
+              "effect": {
+                "value": "Audit"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "type": "Microsoft.Authorization/policyAssignments",
+      "apiVersion": "2023-04-01",
+      "name": "[format('{0}-ai-security-baseline-assign', parameters('namePrefix'))]",
+      "properties": {
+        "displayName": "[format('{0}: Azure AI security baseline assignment', parameters('displayPrefix'))]",
+        "description": "Assigns the Azure AI security baseline (6 built-in controls) to the current subscription.",
+        "policyDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/policySetDefinitions', format('{0}-foundry-ai-security-baseline', parameters('namePrefix')))]",
+        "enforcementMode": "Default"
+      },
+      "dependsOn": [
+        "[subscriptionResourceId('Microsoft.Authorization/policySetDefinitions', format('{0}-foundry-ai-security-baseline', parameters('namePrefix')))]"
+      ]
+    },
+    {
+      "type": "Microsoft.Authorization/policyAssignments",
+      "apiVersion": "2023-04-01",
+      "name": "[format('{0}-nist-ai-rmf-assign', parameters('namePrefix'))]",
+      "properties": {
+        "displayName": "[format('{0}: NIST AI RMF v1.0', parameters('displayPrefix'))]",
+        "description": "Audits compliance with the NIST AI Risk Management Framework v1.0.",
+        "policyDefinitionId": "[tenantResourceId('Microsoft.Authorization/policySetDefinitions', 'f58a876c-ec25-417e-9634-58d2a93e3fe2')]",
+        "enforcementMode": "Default"
+      }
+    },
+    {
+      "type": "Microsoft.Authorization/policyAssignments",
+      "apiVersion": "2023-04-01",
+      "name": "[format('{0}-eu-ai-act-assign', parameters('namePrefix'))]",
+      "properties": {
+        "displayName": "[format('{0}: EU AI Act 2024/1689', parameters('displayPrefix'))]",
+        "description": "Audits compliance with the EU AI Act (Regulation 2024/1689).",
+        "policyDefinitionId": "[tenantResourceId('Microsoft.Authorization/policySetDefinitions', '1308bccf-446a-4283-a4e0-0c983fe7a572')]",
+        "enforcementMode": "Default"
+      }
+    }
+  ],
+  "outputs": {
+    "securityBaselineInitiativeId": {
+      "type": "string",
+      "value": "[subscriptionResourceId('Microsoft.Authorization/policySetDefinitions', format('{0}-foundry-ai-security-baseline', parameters('namePrefix')))]"
+    },
+    "securityBaselineAssignmentId": {
+      "type": "string",
+      "value": "[subscriptionResourceId('Microsoft.Authorization/policyAssignments', format('{0}-ai-security-baseline-assign', parameters('namePrefix')))]"
+    },
+    "nistAiRmfAssignmentId": {
+      "type": "string",
+      "value": "[subscriptionResourceId('Microsoft.Authorization/policyAssignments', format('{0}-nist-ai-rmf-assign', parameters('namePrefix')))]"
+    },
+    "euAiActAssignmentId": {
+      "type": "string",
+      "value": "[subscriptionResourceId('Microsoft.Authorization/policyAssignments', format('{0}-eu-ai-act-assign', parameters('namePrefix')))]"
+    }
+  }
+}
