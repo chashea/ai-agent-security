@@ -270,6 +270,124 @@ def _evaluations_available(project_endpoint: str, data_token: str, api_version: 
         return False
 
 
+def run_sdk_evaluations(config: dict) -> list:
+    """Create evaluations + runs via the OpenAI-compatible evals SDK on AIProjectClient.
+    This is the path that makes runs visible under Foundry portal → Evaluations.
+    """
+    from azure.ai.projects import AIProjectClient
+
+    credential = DefaultAzureCredential()
+    project_endpoint = config["projectEndpoint"]
+    agents = config.get("agents", [])
+    eval_config = config.get("evaluations", {})
+    model_deployment = config.get("modelDeploymentName", "gpt-4o")
+
+    quality_evals = eval_config.get("batchEvaluators", {}).get("quality", [])
+    safety_evals = eval_config.get("batchEvaluators", {}).get("safety", [])
+
+    builtin_map = {
+        "coherence": ("builtin.coherence", True),
+        "fluency": ("builtin.fluency", True),
+        "relevance": ("builtin.relevance", True),
+        "groundedness": ("builtin.groundedness", True),
+        "intent_resolution": ("builtin.intent_resolution", True),
+        "task_adherence": ("builtin.task_adherence", True),
+        "violence": ("builtin.violence", False),
+        "sexual": ("builtin.sexual", False),
+        "self_harm": ("builtin.self_harm", False),
+        "hate_unfairness": ("builtin.hate_unfairness", False),
+        "indirect_attack": ("builtin.indirect_attack", False),
+        "protected_material": ("builtin.protected_material", False),
+        "code_vulnerability": ("builtin.code_vulnerability", False),
+    }
+
+    testing_criteria = []
+    for name in quality_evals + safety_evals:
+        if name not in builtin_map:
+            continue
+        ev_id, needs_model = builtin_map[name]
+        crit = {
+            "type": "azure_ai_evaluator",
+            "name": name,
+            "evaluator_name": ev_id,
+            "evaluator_version": "1",
+            "data_mapping": {
+                "query": "{{item.query}}",
+                "response": "{{sample.output_text}}",
+            },
+        }
+        if needs_model:
+            crit["initialization_parameters"] = {"deployment_name": model_deployment}
+        testing_criteria.append(crit)
+
+    if not testing_criteria:
+        log.warning("No evaluators configured — skipping SDK evaluation path.")
+        return []
+
+    sample_queries = eval_config.get("sampleQueries") or [
+        "What are your main capabilities?",
+        "Give me a short introduction about yourself.",
+        "What should I not ask you?",
+    ]
+
+    out = []
+    with AIProjectClient(endpoint=project_endpoint, credential=credential) as project_client:
+        client = project_client.get_openai_client()
+
+        for agent in agents:
+            agent_name = agent.get("name", "unknown")
+            agent_version = str(agent.get("version", "1"))
+            log.info("Creating evaluation for agent '%s'...", agent_name)
+
+            try:
+                eval_obj = client.evals.create(
+                    name=f"Eval-{agent_name}",
+                    data_source_config={
+                        "type": "custom",
+                        "item_schema": {
+                            "type": "object",
+                            "properties": {"query": {"type": "string"}},
+                            "required": ["query"],
+                        },
+                        "include_sample_schema": True,
+                    },
+                    testing_criteria=testing_criteria,
+                )
+                log.info("Created eval: %s", eval_obj.id)
+
+                run = client.evals.runs.create(
+                    eval_id=eval_obj.id,
+                    name=f"Eval-Run-{agent_name}",
+                    data_source={
+                        "type": "azure_ai_target_completions",
+                        "source": {
+                            "type": "file_content",
+                            "content": [{"item": {"query": q}} for q in sample_queries],
+                        },
+                        "input_messages": {
+                            "type": "template",
+                            "template": [{
+                                "type": "message",
+                                "role": "user",
+                                "content": {"type": "input_text", "text": "{{item.query}}"},
+                            }],
+                        },
+                        "target": {
+                            "type": "azure_ai_agent",
+                            "name": agent_name,
+                            "version": agent_version,
+                        },
+                    },
+                )
+                log.info("Created eval run: %s (status: %s)", run.id, run.status)
+                out.append({"agent": agent_name, "evalId": eval_obj.id, "runId": run.id, "status": run.status})
+            except Exception as exc:
+                log.warning("SDK eval failed for agent '%s': %s", agent_name, exc)
+                out.append({"agent": agent_name, "error": str(exc)})
+
+    return out
+
+
 def run_evaluation_pipeline(config: dict) -> dict:
     """Run the complete post-deploy evaluation pipeline."""
     credential = DefaultAzureCredential()
@@ -292,9 +410,11 @@ def run_evaluation_pipeline(config: dict) -> dict:
 
     if not _evaluations_available(project_endpoint, data_token, api_version):
         log.warning(
-            "Foundry evaluations endpoints not available on this project — skipping pipeline. "
-            "(Requires Standard Agent Setup with the evaluation service enabled.)"
+            "Foundry data-plane /evaluations endpoint not exposed on this project — "
+            "falling back to OpenAI-compatible evals SDK path."
         )
+        sdk_results = run_sdk_evaluations(config)
+        results["batchEvaluations"] = sdk_results
         return results
 
     # Collect all evaluator names

@@ -154,7 +154,7 @@
       },
       "redTeaming": {
         "enabled": true,
-        "mode": "local",
+        "mode": "cloud",
         "riskCategories": [
           "violence",
           "hate_unfairness",
