@@ -426,6 +426,34 @@ function Deploy-FoundryBicep {
                 $aiSearchEndpoint = [string]$evalResult.properties.outputs.aiSearchEndpoint.value
             }
             Write-LabLog -Message 'Eval infrastructure deployed' -Level Success
+
+            # Grant the deploying identity the roles needed to create the
+            # aisec-compliance-index and upload documents (the populator runs
+            # as the same identity via DefaultAzureCredential / az login).
+            # Both data-plane RBAC roles are required: Search Service
+            # Contributor manages the index; Search Index Data Contributor
+            # uploads documents. Failures here are non-fatal — population
+            # falls back to a warning.
+            $deployerObjectId = $null
+            try {
+                $deployerObjectId = (az ad signed-in-user show --query id -o tsv 2>$null)
+                if ($LASTEXITCODE -ne 0) { $deployerObjectId = $null }
+            } catch { $deployerObjectId = $null }
+
+            if ($deployerObjectId -and $evalResult.properties.outputs.PSObject.Properties['aiSearchId']) {
+                $aiSearchId = [string]$evalResult.properties.outputs.aiSearchId.value
+                foreach ($role in @('Search Service Contributor','Search Index Data Contributor')) {
+                    try {
+                        az role assignment create --assignee-object-id $deployerObjectId `
+                            --assignee-principal-type User --role "$role" --scope $aiSearchId `
+                            --subscription $subscriptionId --output none 2>$null
+                    } catch { Write-LabLog -Message "Search role '$role' assignment skipped (may already exist)." -Level Info }
+                }
+                Write-LabLog -Message 'Granted deployer Search Service + Index Data Contributor on aisec-search.' -Level Info
+            }
+            else {
+                Write-LabLog -Message 'Skipped Search RBAC grant (signed-in user not detected).' -Level Warning
+            }
         }
         else {
             Write-LabLog -Message "Eval infra deployment failed (non-fatal): $evalOutput" -Level Warning

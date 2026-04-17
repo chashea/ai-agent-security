@@ -345,6 +345,50 @@ function Deploy-Foundry {
             Write-LabLog -Message "Created $vsCount vector store(s)." -Level Success
         }
         catch { Write-LabLog -Message "Knowledge base upload error: $($_.Exception.Message)" -Level Warning }
+
+        # ── Step 3b: Populate Azure AI Search index ──────────────────────────
+        # Several agents declare an `azure_ai_search` tool pointing at
+        # `aisec-compliance-index`. Without this step the index doesn't exist
+        # and queries silently return zero results. We pass the same demo doc
+        # corpus as file_search so demos can compare both grounding paths
+        # side-by-side. Failure here is a warning — file_search still works.
+        $searchEndpoint = if ($bicepResult.PSObject.Properties['aiSearchEndpoint']) {
+            [string]$bicepResult.aiSearchEndpoint
+        } else { '' }
+        if ([string]::IsNullOrWhiteSpace($searchEndpoint) -and
+            $fw.PSObject.Properties['connections'] -and
+            $fw.connections.PSObject.Properties['aiSearch'] -and
+            $fw.connections.aiSearch.PSObject.Properties['endpoint']) {
+            $searchEndpoint = [string]$fw.connections.aiSearch.endpoint
+        }
+        if (-not [string]::IsNullOrWhiteSpace($searchEndpoint)) {
+            Write-LabStep -StepName 'AI Search Index' -Description 'Creating aisec-compliance-index and uploading documents'
+
+            $indexName = 'aisec-compliance-index'
+            if ($fw.connections.aiSearch.PSObject.Properties['indexName']) {
+                $indexName = [string]$fw.connections.aiSearch.indexName
+            }
+            $embedModel = if ($fw.PSObject.Properties['embeddingsModel']) { [string]$fw.embeddingsModel } else { 'text-embedding-3-small' }
+
+            $searchInput = [ordered]@{} + $pythonBase
+            $searchInput['searchEndpoint']        = $searchEndpoint
+            $searchInput['indexName']             = $indexName
+            $searchInput['openaiEndpoint']        = "https://$accountName.cognitiveservices.azure.com"
+            $searchInput['embeddingsModel']       = $embedModel
+            $searchInput['embeddingsApiVersion'] = '2024-10-21'
+            $searchInput['knowledgeBase']         = $kbMap
+
+            try {
+                $searchResult = Invoke-FoundryPython -ScriptName 'foundry_search_index.py' -Action 'populate' -InputData $searchInput
+                $uploaded = if ($searchResult.PSObject.Properties['documentsUploaded']) { [int]$searchResult.documentsUploaded } else { 0 }
+                $attempted = if ($searchResult.PSObject.Properties['documentsAttempted']) { [int]$searchResult.documentsAttempted } else { 0 }
+                Write-LabLog -Message "AI Search index '$indexName' populated: $uploaded/$attempted documents." -Level Success
+            }
+            catch { Write-LabLog -Message "AI Search index population error: $($_.Exception.Message)" -Level Warning }
+        }
+        else {
+            Write-LabLog -Message 'Skipping AI Search index population (no aiSearchEndpoint).' -Level Info
+        }
     }
 
     # ── Step 4: Build tool definitions per agent ─────────────────────────────
@@ -715,6 +759,29 @@ function Remove-Foundry {
             Write-LabLog -Message 'Vector stores cleaned up.' -Level Success
         }
         catch { Write-LabLog -Message "Vector store cleanup error: $($_.Exception.Message)" -Level Warning }
+    }
+
+    # ── 3b. Delete Azure AI Search index ─────────────────────────────────────
+    $searchEndpointForCleanup = if ($Manifest -and $Manifest.PSObject.Properties['aiSearchEndpoint'] -and
+        -not [string]::IsNullOrWhiteSpace([string]$Manifest.aiSearchEndpoint)) {
+        [string]$Manifest.aiSearchEndpoint
+    }
+    elseif ($fw.PSObject.Properties['connections'] -and $fw.connections.PSObject.Properties['aiSearch'] -and
+            $fw.connections.aiSearch.PSObject.Properties['endpoint']) {
+        [string]$fw.connections.aiSearch.endpoint
+    }
+    else { '' }
+    if (-not [string]::IsNullOrWhiteSpace($searchEndpointForCleanup)) {
+        try {
+            $idxName = 'aisec-compliance-index'
+            if ($fw.connections.aiSearch.PSObject.Properties['indexName']) {
+                $idxName = [string]$fw.connections.aiSearch.indexName
+            }
+            $idxCleanup = @{ searchEndpoint = $searchEndpointForCleanup; indexName = $idxName }
+            Invoke-FoundryPython -ScriptName 'foundry_search_index.py' -Action 'cleanup' -InputData $idxCleanup | Out-Null
+            Write-LabLog -Message "AI Search index '$idxName' deleted." -Level Success
+        }
+        catch { Write-LabLog -Message "AI Search index cleanup error: $($_.Exception.Message)" -Level Warning }
     }
 
     # ── 4. Remove agents via Python SDK ──────────────────────────────────────

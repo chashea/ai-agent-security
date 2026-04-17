@@ -18,6 +18,15 @@ resource aiSearch 'Microsoft.Search/searchServices@2024-06-01-preview' = {
   }
   properties: {
     publicNetworkAccess: 'Enabled'
+    // Enable AAD-based data-plane auth alongside API keys so the lab
+    // populator (which uses DefaultAzureCredential bearer tokens) can
+    // create indexes and upload documents without an admin key.
+    authOptions: {
+      aadOrApiKey: {
+        aadAuthFailureMode: 'http401WithBearerChallenge'
+      }
+    }
+    semanticSearch: 'standard'
   }
 }
 
