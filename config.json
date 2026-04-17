@@ -31,6 +31,7 @@
       },
       "connections": {
         "aiSearch": {
+          "endpoint": "https://aisec-search-eastus.search.windows.net",
           "indexName": "aisec-compliance-index"
         },
         "bingSearch": {},

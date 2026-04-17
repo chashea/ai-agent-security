@@ -133,6 +133,12 @@ function Deploy-Foundry {
     if ($bicepResult.PSObject.Properties['aiSearchEndpoint']) {
         $manifest.aiSearchEndpoint = $bicepResult.aiSearchEndpoint
     }
+    if ([string]::IsNullOrWhiteSpace($manifest.aiSearchEndpoint) -and
+        $fw.PSObject.Properties['connections'] -and $fw.connections -and
+        $fw.connections.PSObject.Properties['aiSearch'] -and
+        $fw.connections.aiSearch.PSObject.Properties['endpoint']) {
+        $manifest.aiSearchEndpoint = [string]$fw.connections.aiSearch.endpoint
+    }
 
     # Deploy Defender for Cloud posture (if enabled)
     $defenderPosture = if ($fw.PSObject.Properties['defenderPosture']) { [bool]$fw.defenderPosture } else { $false }
@@ -228,6 +234,9 @@ function Deploy-Foundry {
         # Build connection configs with endpoints from Bicep outputs
         if ($fw.connections.PSObject.Properties['aiSearch']) {
             $searchEndpoint = if ($bicepResult.PSObject.Properties['aiSearchEndpoint']) { [string]$bicepResult.aiSearchEndpoint } else { '' }
+            if ([string]::IsNullOrWhiteSpace($searchEndpoint) -and $fw.connections.aiSearch.PSObject.Properties['endpoint']) {
+                $searchEndpoint = [string]$fw.connections.aiSearch.endpoint
+            }
             $connInput['connections']['aiSearch'] = @{
                 endpoint  = $searchEndpoint
                 indexName = [string]$fw.connections.aiSearch.indexName

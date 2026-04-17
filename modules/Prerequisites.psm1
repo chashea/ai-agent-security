@@ -208,8 +208,17 @@ function Connect-LabServices {
     }
 
     if ($ConnectAzure) {
-        Write-Verbose "Connecting to Azure (tenant: $TenantId)..."
-        Connect-AzAccount -TenantId $TenantId -ErrorAction Stop | Out-Null
+        $existingAz = $null
+        try { $existingAz = Get-AzContext -ErrorAction SilentlyContinue } catch { Write-Verbose "Get-AzContext threw: $_" }
+        if ($existingAz -and $existingAz.Account -and $existingAz.Tenant.Id -eq $TenantId) {
+            Write-Verbose "Reusing existing Az context (account: $($existingAz.Account.Id), tenant: $TenantId)"
+        }
+        else {
+            Write-Verbose "Connecting to Azure (tenant: $TenantId)..."
+            $azConnectParams = @{ TenantId = $TenantId; ErrorAction = 'Stop' }
+            if ($UseDeviceCode) { $azConnectParams['UseDeviceAuthentication'] = $true }
+            Connect-AzAccount @azConnectParams | Out-Null
+        }
 
         if (-not [string]::IsNullOrWhiteSpace($AzureSubscriptionId)) {
             Set-AzContext -SubscriptionId $AzureSubscriptionId -ErrorAction Stop | Out-Null
