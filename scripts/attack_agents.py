@@ -178,11 +178,18 @@ def chat_completion(
     end_user_id: str,
     application_name: str,
     source_ip: str = DEFAULT_SOURCE_IP,
-    timeout: float = 60.0,
+    timeout: float = 30.0,
     max_retries: int = 5,
+    max_total_time: float = 90.0,
     session: requests.Session | None = None,
 ) -> tuple[int, str]:
-    """Send a single chat completion. Returns (status, body_or_content)."""
+    """Send a single chat completion. Returns (status, body_or_content).
+
+    Cap total wall-clock at ``max_total_time`` seconds across all retries.
+    Without this, a single hung TCP socket + the exponential backoff loop
+    could block the entire harness for hours (observed: 13+ min on a 145-call
+    burst before manual kill).
+    """
     sess = session or requests
     url = (
         f"{base_url}/openai/deployments/{model_deployment}/chat/completions"
@@ -206,7 +213,11 @@ def chat_completion(
         },
     }
     delay = 1.0
+    deadline = time.monotonic() + max_total_time
     for attempt in range(1, max_retries + 1):
+        if time.monotonic() >= deadline:
+            log.warning("  hard timeout after %.0fs (attempts: %d)", max_total_time, attempt - 1)
+            return 0, f"hard_timeout_{int(max_total_time)}s"
         try:
             resp = sess.post(url, json=body, headers=headers, timeout=timeout)
         except requests.exceptions.RequestException as exc:
