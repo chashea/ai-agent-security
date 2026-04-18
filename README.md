@@ -29,6 +29,9 @@ Deploy AI agents from Azure AI Foundry and automatically wrap them with:
 # Foundry only: skip labeling and adjacent identity workloads
 ./Deploy.ps1 -ConfigPath config.json -FoundryOnly
 
+# AI Gateway only: provisions APIM against existing Foundry; ~30 min
+./Deploy.ps1 -ConfigPath config.json -AIGatewayOnly
+
 # Dry run: validate config and show what would be deployed (no cloud connection)
 ./Deploy.ps1 -ConfigPath config.json -SkipAuth -WhatIf
 ```

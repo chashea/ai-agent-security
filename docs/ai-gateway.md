@@ -83,7 +83,20 @@ role assignment resolve):
 ./Deploy.ps1 -ConfigPath config.json
 ```
 
-Skip everything else to iterate only on the gateway:
+Iterate only on the gateway — assumes Foundry is already deployed, skips
+everything else:
+
+```powershell
+./Deploy.ps1 -ConfigPath config.json -AIGatewayOnly
+```
+
+`-AIGatewayOnly` skips Exchange + Graph connects, runs only the AIGateway
+workload, and skips post-deploy validation. If the Foundry account
+doesn't exist in the target RG, the Bicep deploy fails with a clear
+missing-resource error — create it first with `-FoundryOnly` or a full
+run.
+
+Alternative: full Foundry + AIGateway without security workloads:
 
 ```powershell
 # Foundry + AgentIdentity + AIGateway, skip labeling + identity workloads

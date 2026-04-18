@@ -17,7 +17,13 @@
     Skip Foundry and AgentIdentity workloads. Deploy security controls only.
 
 .PARAMETER FoundryOnly
-    Deploy Foundry and AgentIdentity only. Skip labeling and adjacent identity workloads.
+    Deploy Foundry, AgentIdentity, and AIGateway. Skip labeling and adjacent identity workloads.
+
+.PARAMETER AIGatewayOnly
+    Deploy only the APIM-based AI Gateway workload. Assumes the Foundry
+    account already exists in the target resource group. Skips Foundry,
+    AgentIdentity, and all security workloads. Useful for iterating on
+    gateway config without re-running the full pipeline.
 
 .PARAMETER SkipTestUsers
     Skip test user creation entirely. Useful when deploying policies against
@@ -44,6 +50,9 @@
 
 .EXAMPLE
     ./Deploy.ps1 -FoundryOnly -Cloud commercial
+
+.EXAMPLE
+    ./Deploy.ps1 -AIGatewayOnly
 
 .EXAMPLE
     ./Deploy.ps1 -ConfigPath ./config.json -WhatIf
@@ -79,14 +88,18 @@ param(
     [string]$TestUsersMode,
 
     [Parameter()]
-    [switch]$AdversarialTraffic
+    [switch]$AdversarialTraffic,
+
+    [Parameter()]
+    [switch]$AIGatewayOnly
 )
 
 $ErrorActionPreference = 'Stop'
 
 # Mutual exclusion guard
-if ($SkipFoundry -and $FoundryOnly) {
-    throw '-SkipFoundry and -FoundryOnly are mutually exclusive. Specify at most one.'
+$selectorCount = @($SkipFoundry, $FoundryOnly, $AIGatewayOnly).Where({ $_ }).Count
+if ($selectorCount -gt 1) {
+    throw '-SkipFoundry, -FoundryOnly, and -AIGatewayOnly are mutually exclusive. Specify at most one.'
 }
 
 # Import Prerequisites early
@@ -151,13 +164,16 @@ try {
     elseif ($FoundryOnly) {
         Write-LabLog -Message 'Mode: Foundry only (-FoundryOnly).' -Level Info
     }
+    elseif ($AIGatewayOnly) {
+        Write-LabLog -Message 'Mode: AI Gateway only (-AIGatewayOnly). Assumes Foundry core already exists.' -Level Info
+    }
     else {
         Write-LabLog -Message 'Mode: Full deployment (Foundry + Security).' -Level Info
     }
 
     # Determine whether Foundry workloads are active
     $foundryConfigEnabled = $Config.workloads.PSObject.Properties['foundry'] -and $Config.workloads.foundry.enabled
-    $deployFoundry = $foundryConfigEnabled -and -not $SkipFoundry
+    $deployFoundry = $foundryConfigEnabled -and -not $SkipFoundry -and -not $AIGatewayOnly
 
     # Test prerequisites
     Write-LabStep -StepName 'Prerequisites' -Description 'Validating prerequisites'
@@ -176,19 +192,21 @@ try {
 
         Write-LabStep -StepName 'Auth' -Description 'Connecting to cloud services'
         # Exchange Online (IPPS session) is required for sensitivity-label cmdlets.
-        # Foundry-only mode skips it and connects Graph with a minimal scope set
-        # for the Teams catalog publish step (AppCatalog.ReadWrite.All).
-        $needsExchange = -not $FoundryOnly
-        $needsGraph = $true
-        $azureSubscriptionId = if ($deployFoundry -and $Config.workloads.foundry.PSObject.Properties['subscriptionId']) {
+        # Foundry-only + AI Gateway-only modes skip it. Graph is skipped
+        # entirely for AI Gateway-only since Bicep-only deploys don't touch
+        # the Teams catalog or Graph-backed identity grants.
+        $needsExchange = -not $FoundryOnly -and -not $AIGatewayOnly
+        $needsGraph = -not $AIGatewayOnly
+        $azureSubscriptionId = if ($Config.workloads.foundry.PSObject.Properties['subscriptionId']) {
             [string]$Config.workloads.foundry.subscriptionId
         }
         else { $null }
+        $needsAzure = $deployFoundry -or $AIGatewayOnly
         $connectParams = @{
             TenantId            = $TenantId
             SkipExchange        = (-not $needsExchange)
             SkipGraph           = (-not $needsGraph)
-            ConnectAzure        = $deployFoundry
+            ConnectAzure        = $needsAzure
             AzureSubscriptionId = $azureSubscriptionId
         }
         if ($FoundryOnly) {
@@ -308,7 +326,29 @@ try {
     # Deploy workloads in dependency order
     # Foundry deploys first — agents must exist before labels, CA, or MDCA wrap them
 
-    if (-not $SkipFoundry) {
+    if ($AIGatewayOnly) {
+        # Narrow path: only deploy the AI Gateway workload. Assumes Foundry
+        # core is already present in the target RG (needed for the APIM MI
+        # role assignment and the backend URL). A Foundry manifest is
+        # synthesized from config so Deploy-AIGateway sees the expected
+        # account name without re-running the Foundry workload.
+        if ($Config.workloads.PSObject.Properties['aiGateway'] -and $Config.workloads.aiGateway.enabled) {
+            $foundryStub = [PSCustomObject]@{
+                subscriptionId        = [string]$Config.workloads.foundry.subscriptionId
+                resourceGroup         = [string]$Config.workloads.foundry.resourceGroup
+                location              = [string]$Config.workloads.foundry.location
+                accountName           = [string]$Config.workloads.foundry.accountName
+                appInsightsResourceId = "/subscriptions/$($Config.workloads.foundry.subscriptionId)/resourceGroups/$($Config.workloads.foundry.resourceGroup)/providers/Microsoft.Insights/components/$($Config.prefix.ToLower())-appinsights"
+            }
+            Invoke-Workload -Name 'aiGateway' -Step 'AIGateway' -Description 'Provisioning APIM-based AI Gateway (standalone; assumes Foundry exists)' -Action {
+                Deploy-AIGateway -Config $Config -FoundryManifest $foundryStub -WhatIf:$WhatIfPreference
+            }
+        }
+        else {
+            Write-LabLog -Message 'aiGateway workload is disabled in config; -AIGatewayOnly has nothing to do.' -Level Warning
+        }
+    }
+    elseif (-not $SkipFoundry) {
         if ($foundryConfigEnabled) {
             Invoke-Workload -Name 'foundry' -Step 'Foundry' -Description 'Deploying Azure AI Foundry account, project, and agents' -Action {
                 Deploy-Foundry -Config $Config -WhatIf:$WhatIfPreference
@@ -332,8 +372,8 @@ try {
         Write-LabLog -Message 'Foundry, AgentIdentity, and AIGateway skipped (-SkipFoundry).' -Level Info
     }
 
-    # Security workloads — skipped when -FoundryOnly is set
-    if (-not $FoundryOnly) {
+    # Security workloads — skipped when -FoundryOnly or -AIGatewayOnly is set
+    if (-not $FoundryOnly -and -not $AIGatewayOnly) {
 
         if ($Config.workloads.PSObject.Properties['testUsers'] -and $Config.workloads.testUsers.enabled) {
             Invoke-Workload -Name 'testUsers' -Step 'TestUsers' -Description 'Deploying test users' -Action {
@@ -363,7 +403,8 @@ try {
 
     }
     else {
-        Write-LabLog -Message 'Labeling and adjacent identity workloads skipped (-FoundryOnly).' -Level Info
+        $skipReason = if ($AIGatewayOnly) { '-AIGatewayOnly' } else { '-FoundryOnly' }
+        Write-LabLog -Message "Labeling and adjacent identity workloads skipped ($skipReason)." -Level Info
     }
 
     # Export manifest (skip in WhatIf)
@@ -409,7 +450,7 @@ try {
     }
 
     # Post-deploy validation
-    if (-not $WhatIfPreference -and -not $SkipAuth -and -not $FoundryOnly) {
+    if (-not $WhatIfPreference -and -not $SkipAuth -and -not $FoundryOnly -and -not $AIGatewayOnly) {
         Write-LabStep -StepName 'Validation' -Description 'Validating deployed objects'
         $validationFailures = [System.Collections.Generic.List[string]]::new()
         $validationWarnings = [System.Collections.Generic.List[string]]::new()
@@ -494,8 +535,11 @@ try {
     elseif ($FoundryOnly) {
         Write-LabLog -Message 'Skipping post-deploy validation for labeling/identity workloads (-FoundryOnly).' -Level Info
     }
+    elseif ($AIGatewayOnly) {
+        Write-LabLog -Message 'Skipping post-deploy validation (-AIGatewayOnly). Verify gateway with the curl commands in docs/ai-gateway.md.' -Level Info
+    }
 
-    if (-not $WhatIfPreference -and -not $SkipAuth -and -not $SkipFoundry -and
+    if (-not $WhatIfPreference -and -not $SkipAuth -and -not $SkipFoundry -and -not $AIGatewayOnly -and
         $manifest.ContainsKey('foundry') -and $manifest.foundry -and
         $manifest.foundry.PSObject.Properties['projectEndpoint'] -and
         $manifest.foundry.PSObject.Properties['agents']) {
