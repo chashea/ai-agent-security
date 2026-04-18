@@ -9,7 +9,7 @@
       "name": "aisec-aigw",
       "sku": "BasicV2",
       "capacity": 1,
-      "publisherEmail": "charlesjshea15@gmail.com",
+      "publisherEmail": "charlesshea@MngEnvMCAP648165.onmicrosoft.com",
       "publisherName": "AISec AI Gateway",
       "tokensPerMinute": 1000,
       "monthlyTokenQuota": 0,
