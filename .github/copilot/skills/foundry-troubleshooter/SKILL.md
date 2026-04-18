@@ -63,7 +63,7 @@ If no match found, say so. Don't invent a fix. Hand back what you searched and s
 |---|---|---|
 | `Token tenant does not match resource tenant` | docs/troubleshooting.md → "Foundry data-plane calls return Token tenant does not match" | `az account set --subscription <id>` |
 | `@{type=string}` in agent tool config | → "ConvertTo-Json -Depth 10 truncates OpenAPI" | `modules/Foundry.psm1` JsonDepth=20 |
-| `At least one of base_url or project_connection_id` (A2A) | → "a2a_preview rejected" | Tool disabled pending schema |
+| `At least one of base_url or project_connection_id` (A2A) | → "a2a_preview rejected" | Set `connections.a2a` and rerun (v0.9+ auto-provisions) |
 | `Required properties ["project_connection_id"]` on bing | → "bing_grounding rejected" | Needs `connections.bingSearch` |
 | `HTTP 500` on project PUT | → "Foundry project creation returns HTTP 500" | MCAPS exemption + full body |
 | `HTTP 405` on connection PUT | → "Project connection PUT returns HTTP 405" | Use ARM path |

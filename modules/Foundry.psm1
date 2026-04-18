@@ -488,11 +488,7 @@ function Deploy-Foundry {
     # published we have baseUrls — rebuild the tool definitions with the
     # populated manifest and re-apply them via delete-and-recreate so a2a_preview
     # actually lands on the agents.
-    #
-    # TEMPORARILY DISABLED (2026-04-13): a2a_preview schema is unstable in the
-    # current preview API and rejects every shape we've tried. Re-enable once
-    # foundry_tools.py build_tool_definitions emits a valid a2a payload.
-    $needsA2aRefresh = $false
+    $needsA2aRefresh = $true
     $haveBaseUrls = @($manifest.agents | Where-Object { $_.baseUrl }).Count -gt 0
     if ($needsA2aRefresh -and $haveBaseUrls) {
         Write-LabStep -StepName 'Tool Refresh' -Description 'Re-applying tool definitions with a2a baseUrls'
@@ -679,6 +675,32 @@ function Deploy-Foundry {
             Write-LabLog -Message 'AI Red Teaming complete.' -Level Success
         }
         catch { Write-LabLog -Message "Red Teaming error: $($_.Exception.Message)" -Level Warning }
+
+        # Post-Step-8: generate an HTML trend report against the prior manifest.
+        # Non-fatal — absence of a baseline or missing scorecard data just means
+        # the HTML shows current-only values. Requires a deploy to have written
+        # the current scorecard back to disk first, so we trigger this after the
+        # parent workflow serializes the manifest — signal via a deferred file
+        # marker rather than running it inline here.
+        try {
+            $repoRoot = Split-Path -Parent $PSScriptRoot
+            $trendScript = Join-Path $repoRoot 'scripts/trend_redteam.py'
+            $logsDir = Join-Path $repoRoot 'logs'
+            if (-not (Test-Path $logsDir)) { New-Item -ItemType Directory -Path $logsDir -Force | Out-Null }
+            $stamp = (Get-Date -Format 'yyyyMMdd-HHmmss')
+            $htmlPath = Join-Path $logsDir "redteam-trend-$stamp.html"
+            if (Test-Path $trendScript) {
+                Write-LabLog -Message "Generating red-team trend HTML: $htmlPath" -Level Info
+                & python3.12 $trendScript --html $htmlPath 2>&1 | Out-Null
+                if ($LASTEXITCODE -eq 0 -and (Test-Path $htmlPath)) {
+                    Write-LabLog -Message "Red-team trend HTML written to $htmlPath" -Level Success
+                }
+                else {
+                    Write-LabLog -Message 'trend_redteam.py did not produce HTML (no manifests yet, or new baseline). Skipping.' -Level Info
+                }
+            }
+        }
+        catch { Write-LabLog -Message "Trend HTML generation error: $($_.Exception.Message)" -Level Warning }
         }
     }
 

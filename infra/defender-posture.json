@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.39.26.7824",
-      "templateHash": "14672620906254933365"
+      "templateHash": "12241104575715705731"
     }
   },
   "parameters": {
@@ -35,6 +35,13 @@
       "defaultValue": true,
       "metadata": {
         "description": "Enable Defender for ARM (Resource Manager)"
+      }
+    },
+    "enableAIDefender": {
+      "type": "bool",
+      "defaultValue": true,
+      "metadata": {
+        "description": "Enable Defender for AI services (Data security for AI interactions)"
       }
     }
   },
@@ -73,6 +80,29 @@
       "name": "Arm",
       "properties": {
         "pricingTier": "Standard"
+      }
+    },
+    {
+      "condition": "[parameters('enableAIDefender')]",
+      "type": "Microsoft.Security/pricings",
+      "apiVersion": "2024-01-01",
+      "name": "AI",
+      "properties": {
+        "pricingTier": "Standard",
+        "extensions": [
+          {
+            "name": "AIModelScanner",
+            "isEnabled": "True"
+          },
+          {
+            "name": "AIPromptEvidence",
+            "isEnabled": "True"
+          },
+          {
+            "name": "AIPromptSharingWithPurview",
+            "isEnabled": "True"
+          }
+        ]
       }
     }
   ]

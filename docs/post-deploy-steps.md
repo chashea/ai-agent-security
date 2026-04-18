@@ -7,6 +7,19 @@ by MCAPS governance policies that cannot be bypassed automatically. Work
 through this checklist after every clean deploy; most items are one-time
 per lab tenant.
 
+## Status at a glance (v0.9.0)
+
+| # | Item | Status |
+|---|---|---|
+| 1 | Approve Agent 365 digital-worker submissions | `Manual — tenant admin, no API` |
+| 2 | Deploy Teams apps to users | `Manual — MCAPS blocks automated path` |
+| 3 | Defender for Cloud "Data security for AI interactions" | `Automated — infra/defender-posture.bicep` |
+| 3a | Foundry guardrail-baseline initiative | `Automated — see workflow note` |
+| 4 | Populate `connections.sharePoint.siteUrl` | `Manual — external resource` |
+| 5 | Provision Bing Grounding | `Automated — bingSearch.provision=true` |
+| 6 | Pre-connect Graph for silent reruns | `Optional convenience — Deploy.ps1 handles` |
+| 7 | Fire adversarial traffic | `Automated — Deploy.ps1 -AdversarialTraffic` |
+
 ## 1. Approve Agent 365 digital-worker submissions
 
 **When.** After `workloads.foundry.agent365.enabled = true` and a deploy
@@ -64,16 +77,14 @@ installs for your account.
 
 ## 3. Enable Defender for Cloud "Data security for AI interactions"
 
-**When.** Once per subscription. This is the subscription-level toggle
-that lets Purview Data Security Posture Management (DSPM for AI) see
-Foundry prompts/responses and feeds the Defender portal "AI agents"
-inventory.
+**Status: AUTOMATED (v0.9.0+).** `infra/defender-posture.bicep` now includes
+a `Microsoft.Security/pricings@2024-01-01` resource named `AI` with
+`pricingTier: Standard` and the three required extensions
+(`AIModelScanner`, `AIPromptEvidence`, `AIPromptSharingWithPurview`). The
+Foundry workload deploys this Bicep at subscription scope, so the toggle
+is flipped as part of every deploy.
 
-**Where.** Defender for Cloud → Environment settings → pick the
-subscription (`9d02bc65-...` in the default tenant) → AI services →
-Settings → **Enable data security for AI interactions**.
-
-**Verify automatically:**
+**Verify:**
 ```bash
 az rest --method GET \
   --uri "https://management.azure.com/subscriptions/<subId>/providers/Microsoft.Security/pricings/AI?api-version=2024-01-01"
@@ -81,14 +92,13 @@ az rest --method GET \
 # Expect: extensions list includes AIModelScanner, AIPromptEvidence, AIPromptSharingWithPurview
 ```
 
-**What to do.** Flip the toggle. The deploy tries to verify this and
-surfaces a warning if it can't read the pricing; the actual enablement
-is safe to do in the portal. Expect a 4–24 hour propagation delay before
-Foundry agents show up under Defender portal → AI security → Agents.
+**Propagation delay.** Expect 4–24 hours before Foundry agents show up
+under Defender portal → AI security → Agents. The Bicep resource applies
+the plan immediately, but indexing of existing Cognitive Services accounts
+is async.
 
-**Why this is manual.** The Defender for AI pricing plan is subscription-
-scoped and the module can't toggle it from a per-deploy script without
-additional role permissions. `Deploy.ps1` only warns.
+**To disable (e.g. cost testing):** set `enableAIDefender: false` in the
+Bicep parameters, or override at deploy time.
 
 ### 3a. (Optional) Deploy the Foundry Control Plane guardrail-baseline initiative
 
@@ -234,6 +244,16 @@ v0.8+ via `Connect-LabServices -UseDeviceCode`; pre-connecting is purely
 a convenience for tight rerun loops.
 
 ## 7. Fire adversarial traffic to light up detections
+
+**Status: AUTOMATED opt-in (v0.9.0+).** Pass `-AdversarialTraffic` to
+`Deploy.ps1` to fire the catalog automatically at the end of a deploy:
+
+```powershell
+./Deploy.ps1 -ConfigPath config.json -AdversarialTraffic
+```
+
+Writes a full JSON report to `logs/attack_<timestamp>.json`. The sections
+below still apply for ad-hoc / scoped runs.
 
 **When.** After the Foundry workload is deployed and Defender / Purview
 are enabled (steps 3 + 5) and you want to *see* alerts surface in the

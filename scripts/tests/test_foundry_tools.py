@@ -300,49 +300,37 @@ class TestBuildTools:
 
 
 class TestA2aTool:
-    """a2a_preview: default skipped, opt-in via experimentalA2A flag."""
+    """a2a_preview: requires an Agent2Agent project connection (category Agent2Agent)."""
 
-    def test_a2a_skipped_by_default(self, caplog):
+    def test_a2a_emits_project_connection_id_when_connection_available(self):
         defs = build_tool_definitions(
             agent_tools=[{"type": "a2a"}],
-            agents_manifest=[{"name": "Peer1", "baseUrl": "https://peer1"}],
-        )
-        assert defs == []
-        assert any("a2a tool skipped" in r.message for r in caplog.records)
-
-    def test_a2a_experimental_emits_payload(self, caplog):
-        defs = build_tool_definitions(
-            agent_tools=[{"type": "a2a", "experimental": True}],
-            agents_manifest=[
-                {"name": "Peer1", "baseUrl": "https://peer1"},
-                {"name": "Peer2", "baseUrl": "https://peer2"},
-            ],
+            connection_ids={"a2a": {"id": "/subscriptions/sub/.../connections/aisec-a2a"}},
         )
         assert len(defs) == 1
         tool = defs[0]
         assert tool["type"] == "a2a_preview"
-        assert "_experimental" not in tool  # marker not on the wire
-        agents = tool["a2a_preview"]["agents"]
-        assert {a["name"] for a in agents} == {"Peer1", "Peer2"}
-        assert all(a["base_url"].startswith("https://") for a in agents)
-        assert any("EXPERIMENTAL" in r.message for r in caplog.records)
+        assert tool["project_connection_id"] == "/subscriptions/sub/.../connections/aisec-a2a"
 
-    def test_a2a_experimental_skipped_when_no_peers(self, caplog):
+    def test_a2a_accepts_explicit_connection_id(self):
         defs = build_tool_definitions(
-            agent_tools=[{"type": "a2a", "experimental": True}],
-            agents_manifest=[],
+            agent_tools=[{"type": "a2a", "connectionId": "conn-override"}],
+        )
+        assert len(defs) == 1
+        assert defs[0]["project_connection_id"] == "conn-override"
+
+    def test_a2a_skipped_when_no_connection(self, caplog):
+        defs = build_tool_definitions(
+            agent_tools=[{"type": "a2a"}],
+            connection_ids={},
         )
         assert defs == []
-        assert any("no peers available" in r.message for r in caplog.records)
+        assert any("a2a tool skipped" in r.message for r in caplog.records)
 
-    def test_a2a_flag_propagated_by_build_tools(self):
+    def test_a2a_propagated_via_build_tools(self):
         config = {
             "projectEndpoint": "https://endpoint",
-            "experimentalA2A": True,
-            "agentsManifest": [
-                {"name": "A", "baseUrl": "https://a"},
-                {"name": "B", "baseUrl": "https://b"},
-            ],
+            "connectionIds": {"a2a": {"id": "conn-1"}},
             "agents": [
                 {"name": "A", "tools": [{"type": "a2a"}]},
                 {"name": "B", "tools": [{"type": "a2a"}]},
@@ -353,25 +341,4 @@ class TestA2aTool:
             defs = result["toolDefinitions"][agent]
             assert len(defs) == 1
             assert defs[0]["type"] == "a2a_preview"
-
-    def test_a2a_flag_off_skips(self):
-        config = {
-            "projectEndpoint": "https://endpoint",
-            "agentsManifest": [{"name": "A", "baseUrl": "https://a"}],
-            "agents": [{"name": "A", "tools": [{"type": "a2a"}]}],
-        }
-        result = build_tools(config)
-        assert result["toolDefinitions"]["A"] == []
-
-    def test_a2a_explicit_peers_preferred_over_manifest(self):
-        defs = build_tool_definitions(
-            agent_tools=[{
-                "type": "a2a",
-                "experimental": True,
-                "peers": [{"name": "Explicit", "base_url": "https://explicit"}],
-            }],
-            agents_manifest=[{"name": "FromManifest", "baseUrl": "https://manifest"}],
-        )
-        assert len(defs) == 1
-        names = [a["name"] for a in defs[0]["a2a_preview"]["agents"]]
-        assert names == ["Explicit"]
+            assert defs[0]["project_connection_id"] == "conn-1"

@@ -266,13 +266,11 @@ skipped entirely on each agent (otherwise Foundry shows the agent as
   NOT the OpenAI Chat Completions nested `{type, function: {...}}`.
 - `sharepoint_grounding_preview`, `a2a_preview`, etc. — the nested property
   key must match the `type` field exactly.
-- `a2a_preview` **temporarily disabled** in `foundry_tools.py` (2026-04-13).
-  The preview API rejects every shape tried so far (per-peer `{name, url}`,
-  per-peer `{name, base_url}`, tool-level `{base_url}` or
-  `{project_connection_id}`) with HTTP 400 "At least one of base_url or
-  project_connection_id must be specified for A2A tools." The tool is
-  skipped with a warning until the canonical schema is confirmed. Config
-  can still reference `{"type": "a2a"}` — the builder will log-and-skip.
+- `a2a_preview` takes a flat `project_connection_id` pointing at a project
+  connection of category `Agent2Agent`. The connection is auto-provisioned
+  by `scripts/foundry_tools.py setup_connections` when
+  `workloads.foundry.connections.a2a` is set in config. The tool is
+  skipped with a warning if no connection exists.
 
 **PowerShell → Python JSON depth must be 20+.** `Invoke-FoundryPython`
 in `modules/Foundry.psm1` serializes `$InputData` with `ConvertTo-Json

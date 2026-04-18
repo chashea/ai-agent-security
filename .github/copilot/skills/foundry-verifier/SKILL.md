@@ -31,7 +31,7 @@ For each agent in `config.json` → `workloads.foundry.agents[]`:
    - `azure_function` — `azure_function.function.name` set, input/output bindings populated
    - `openapi` — `openapi.spec.paths` must be a nested object tree, NOT a string containing `@{...}` (that's the PowerShell hashtable `.ToString()` leak from insufficient `ConvertTo-Json -Depth`)
    - `mcp` — `server_label` and `server_url` set
-   - `a2a_preview` — if present, flag it (the tool should be absent until the schema fix lands)
+   - `a2a_preview` — `project_connection_id` must be non-empty and point at an `Agent2Agent` project connection
 
 ## How to run
 
@@ -82,7 +82,8 @@ for full_name, agent_cfg in expected.items():
             if isinstance(spec, str) and '@{' in spec:
                 issue = 'stringified spec (ConvertTo-Json depth leak)'
         elif tt == 'a2a_preview':
-            issue = 'a2a_preview present but should be skipped'
+            conn = t.get('project_connection_id')
+            if not conn: issue = 'empty project_connection_id'
         mark = f"  !! {issue}" if issue else ""
         print(f"  - {tt}{mark}")
 PY
@@ -106,7 +107,7 @@ If drift is detected, point at the likely culprit in the repo:
 - Empty connection IDs → `scripts/foundry_tools.py build_tool_definitions` connection_ids plumbing
 - Stringified OpenAPI → `modules/Foundry.psm1` `Invoke-FoundryPython` JsonDepth
 - Missing tools on rerun → `scripts/foundry_agents.py create_agent` delete-then-create path
-- a2a_preview present → check `foundry_tools.py a2a` branch wasn't re-enabled
+- a2a_preview empty conn → `setup_connections` didn't create the Agent2Agent connection (check `connections.a2a` in config)
 
 ## Non-goals
 

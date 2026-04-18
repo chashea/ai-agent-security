@@ -349,27 +349,29 @@ Bing Search` resource and wire it up via
 
 ## `a2a_preview` rejected with "At least one of base_url or project_connection_id must be specified"
 
-**Symptom.** Agents that request the `a2a` tool fail with HTTP 400
-`At least one of base_url or project_connection_id must be specified for
-A2A tools` at `definition.tools[n]`.
+**Symptom (historical, pre-v0.9.0).** Agents that request the `a2a` tool
+fail with HTTP 400 `At least one of base_url or project_connection_id
+must be specified for A2A tools` at `definition.tools[n]`.
 
-**Root cause.** The `a2a_preview` schema is in flux in the current
-`2025-05-15-preview` API. Per-peer `{name, url}`, per-peer `{name,
-base_url}`, and tool-level `{base_url}` / `{project_connection_id}` have
-all been rejected during testing.
+**Root cause.** Earlier `a2a_preview` schema experiments (per-peer
+`{name, base_url}`, tool-level `{base_url}`, nested
+`{a2a_preview: {agents: [...]}}`) were rejected by the preview API.
 
-**Fix (v0.8).** `foundry_tools.py` temporarily skips the `a2a` tool
-entirely with a warning. The PowerShell-side "Tool Refresh" post-pass in
-`modules/Foundry.psm1` is also guarded (`$needsA2aRefresh = $false`)
-so reruns don't try to re-apply a broken payload. Config can keep
-`{"type": "a2a"}` on agents — it's a no-op until the schema is confirmed.
+**Resolution (v0.9.0+).** The canonical shape is a flat
+`project_connection_id` pointing at a project connection of category
+`Agent2Agent`:
 
-Re-enable by:
-1. Confirming the correct `a2a_preview` payload shape against Microsoft
-   Foundry agent docs or a working reference agent in the portal.
-2. Restoring the definition in `foundry_tools.py`.
-3. Setting `$needsA2aRefresh = $true` in `modules/Foundry.psm1` so
-   reruns apply the tool after baseUrls exist.
+```json
+{"type": "a2a_preview", "project_connection_id": "<connection-id>"}
+```
+
+`setup_connections()` in `foundry_tools.py` auto-provisions the
+Agent2Agent connection when `workloads.foundry.connections.a2a` is
+present in config. If the connection is missing, the builder skips
+the tool with a warning rather than emitting an invalid payload.
+
+If you still hit HTTP 400s on the preview API, confirm the project
+connection exists (`az rest --method GET --uri "$(az account show --query id -o tsv | xargs -I{} echo /subscriptions/{})/resourceGroups/<rg>/providers/Microsoft.CognitiveServices/accounts/<acct>/projects/<proj>/connections/<a2a-name>?api-version=2026-01-15-preview"`) and that its `category` is `Agent2Agent`.
 
 ## `Az.Accounts` interactive auth blocks headless runs
 

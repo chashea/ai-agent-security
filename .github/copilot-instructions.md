@@ -170,9 +170,10 @@ this list is just the gotchas to keep in mind while writing code.
   Chat-Completions nested shape. `connected_agent` uses the nested
   `{type, connected_agent: {...}}` shape. The nested-property key
   must match the `type` value exactly.
-- **`a2a_preview`** is currently disabled in `foundry_tools.py` — preview
-  API rejects every shape attempted. Config can still reference it;
-  the builder log-skips.
+- **`a2a_preview`** uses a flat `project_connection_id` field pointing
+  at a project connection of category `Agent2Agent`. Provision the
+  connection via `workloads.foundry.connections.a2a`; the builder
+  skips with a warning if the connection is missing.
 - **`-Depth 20`** on `ConvertTo-Json` in `Invoke-FoundryPython` is
   load-bearing. The default depth-2 truncates `openapi.config.paths`
   to literal `@{...}` strings that Foundry silently accepts and

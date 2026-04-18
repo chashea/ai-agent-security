@@ -76,7 +76,10 @@ param(
 
     [Parameter()]
     [ValidateSet('create', 'existing')]
-    [string]$TestUsersMode
+    [string]$TestUsersMode,
+
+    [Parameter()]
+    [switch]$AdversarialTraffic
 )
 
 $ErrorActionPreference = 'Stop'
@@ -370,6 +373,32 @@ try {
     }
     else {
         Write-LabLog -Message 'WhatIf mode is active. Skipping manifest export.' -Level Info
+    }
+
+    # Optional adversarial-traffic fire: lights up Defender/Purview/Foundry
+    # detection surfaces after agents are live. Opt-in via -AdversarialTraffic.
+    if ($AdversarialTraffic -and -not $WhatIfPreference) {
+        $attackScript = Join-Path $PSScriptRoot 'scripts/attack_agents.py'
+        if (Test-Path $attackScript) {
+            Write-LabStep -Message 'Firing adversarial traffic (scripts/attack_agents.py)'
+            $logsDir = Join-Path $PSScriptRoot 'logs'
+            if (-not (Test-Path $logsDir)) { New-Item -ItemType Directory -Path $logsDir -Force | Out-Null }
+            $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+            $attackLog = Join-Path $logsDir "attack_$stamp.json"
+            try {
+                & python3.12 $attackScript --output $attackLog
+                if ($LASTEXITCODE -eq 0) {
+                    Write-LabLog -Message "Adversarial traffic report: $attackLog" -Level Success
+                }
+                else {
+                    Write-LabLog -Message "attack_agents.py exited with code $LASTEXITCODE" -Level Warning
+                }
+            }
+            catch { Write-LabLog -Message "Adversarial traffic error: $($_.Exception.Message)" -Level Warning }
+        }
+        else {
+            Write-LabLog -Message 'scripts/attack_agents.py not found — skipping adversarial traffic.' -Level Warning
+        }
     }
 
     # Post-deploy validation

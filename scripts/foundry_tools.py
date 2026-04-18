@@ -297,6 +297,30 @@ def setup_connections(config: dict) -> dict:
             if conn:
                 result["blobStorage"] = conn
 
+    # Agent2Agent (A2A) connection — required for the a2a_preview tool.
+    # The A2A protocol (https://a2a-protocol.org) standardizes cross-agent
+    # communication. Foundry consumes it through a project connection of
+    # category 'Agent2Agent'. The simplest form is an AAD-authenticated
+    # connection targeting the project itself, which lets deployed agents
+    # delegate to peer agents via the Foundry A2A registry.
+    if "a2a" in connections_cfg:
+        a2a_cfg = connections_cfg["a2a"]
+        a2a_target = (
+            a2a_cfg.get("target")
+            or a2a_cfg.get("endpoint")
+            or config.get("projectEndpoint", "")
+        )
+        a2a_name = a2a_cfg.get("name") or f"{prefix}-a2a"
+        if not a2a_target:
+            log.warning(
+                "a2a connection skipped: no target/endpoint available "
+                "(set workloads.foundry.connections.a2a.target or projectEndpoint)."
+            )
+        else:
+            conn = _create(a2a_name, "Agent2Agent", a2a_target)
+            if conn:
+                result["a2a"] = conn
+
     # SharePoint connection — required for the sharepoint_grounding tool.
     # Needs a siteUrl like https://<tenant>.sharepoint.com/sites/<site>.
     if "sharePoint" in connections_cfg:
@@ -557,49 +581,23 @@ def build_tool_definitions(
             })
 
         elif tool_type == "a2a":
-            # a2a_preview is a Foundry preview tool. The public API shape is in
-            # flux — prior builds rejected the per-peer {name, base_url} shape,
-            # the tool-level {base_url}/{project_connection_id} shape, and
-            # empty payloads. The safe default is to skip the tool so a
-            # single broken payload doesn't abort the whole agent create.
-            #
-            # Opt-in experimental mode (workloads.foundry.experimentalA2A=true
-            # in config → tool["experimental"]=True) emits a best-guess
-            # {agents: [{name, base_url}]} payload so schema discovery can
-            # keep progressing against live tenants. Failures are isolated
-            # to the one agent with a2a; the rest continue.
-            if not tool.get("experimental"):
+            # a2a_preview — Agent-to-Agent tool. Canonical Microsoft Learn
+            # schema takes a single project_connection_id pointing at a
+            # project connection of category 'Agent2Agent'. The connection
+            # is provisioned by setup_connections() when
+            # workloads.foundry.connections.a2a is present in config.
+            conn_id = tool.get("connectionId", "")
+            if not conn_id and connection_ids and "a2a" in connection_ids:
+                conn_id = connection_ids["a2a"].get("id", "")
+            if not conn_id:
                 log.warning(
-                    "a2a tool skipped: a2a_preview schema is not stable in the "
-                    "current preview API. Set workloads.foundry.experimentalA2A=true "
-                    "to opt into schema probing on this deploy."
+                    "a2a tool skipped: no Agent2Agent project connection "
+                    "configured (set workloads.foundry.connections.a2a)."
                 )
                 continue
-
-            peers = tool.get("peers") or []
-            if not peers and agents_manifest:
-                # Fall back to wiring every other deployed agent as a peer.
-                peers = [
-                    {"name": m.get("name"), "base_url": m.get("baseUrl")}
-                    for m in agents_manifest
-                    if m.get("name") and m.get("baseUrl")
-                ]
-            if not peers:
-                log.warning("a2a experimental skipped: no peers available.")
-                continue
-
-            log.warning(
-                "a2a EXPERIMENTAL enabled — emitting best-guess payload. "
-                "Expect HTTP 400 on current preview; captured for schema discovery."
-            )
             definitions.append({
                 "type": "a2a_preview",
-                "a2a_preview": {
-                    "agents": [
-                        {"name": p.get("name"), "base_url": p.get("base_url")}
-                        for p in peers
-                    ],
-                },
+                "project_connection_id": conn_id,
             })
 
         elif tool_type == "image_generation":
@@ -615,7 +613,6 @@ def build_tools(config: dict) -> dict:
     vector_stores = config.get("vectorStores", {})
     agents_manifest = config.get("agentsManifest", [])
     project_endpoint = config.get("projectEndpoint", "")
-    experimental_a2a = bool(config.get("experimentalA2A"))
 
     result = {}
     for agent in agents:
@@ -623,14 +620,6 @@ def build_tools(config: dict) -> dict:
         agent_tools = agent.get("tools", [])
         if not agent_tools:
             continue
-
-        # Propagate the top-level experimentalA2A flag into each a2a tool dict
-        # so build_tool_definitions stays a pure function of its inputs.
-        if experimental_a2a:
-            agent_tools = [
-                dict(t, experimental=True) if t.get("type") == "a2a" else t
-                for t in agent_tools
-            ]
 
         vs_ids = []
         if agent_name in vector_stores:

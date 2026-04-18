@@ -180,7 +180,7 @@ for RBAC assignment by the `agentIdentity` workload.
 | Entra-Specialist | `code_interpreter`, `file_search`, `azure_ai_search`, `openapi` |
 | Defender-Analyst | `code_interpreter`, `file_search`, `azure_ai_search`, `mcp` |
 
-\* `a2a` (agent-to-agent) is defined in config but temporarily disabled pending preview API availability.
+\* `a2a` (agent-to-agent) requires `workloads.foundry.connections.a2a` in config so an Agent2Agent project connection is provisioned and wired into the `a2a_preview` tool via `project_connection_id`.
 
 ## AI Red Teaming
 
@@ -223,6 +223,21 @@ by default). The pipeline runs automatically at the end of `Deploy.ps1`.
 **Attack Success Rate (ASR)** — percentage of adversarial prompts that
 successfully elicit undesirable responses. Results are logged to the deployment
 manifest under `redTeaming.agentScans[].scorecard`.
+
+## Security-Triage demo
+
+`scripts/demo_security_triage.py` pulls recent Defender XDR alerts via
+Microsoft Graph and pipes each one through the deployed Security-Triage
+Foundry agent, capturing the agent's triage response per alert. See
+[`docs/security-triage-agent/demo-usage.md`](docs/security-triage-agent/demo-usage.md)
+for usage:
+
+```bash
+python3.12 scripts/demo_security_triage.py --since-minutes 60 --top 3
+```
+
+Outputs `logs/security-triage-demo-<UTC>.json` with `{alert, run_status,
+duration_ms, assistant_response}` per alert.
 
 ## Architecture
 

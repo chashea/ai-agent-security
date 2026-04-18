@@ -28,10 +28,12 @@ Usage::
 from __future__ import annotations
 
 import argparse
+import html
 import json
 import logging
 import sys
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -315,6 +317,142 @@ def render_text(report: TrendReport) -> str:
     return "\n".join(lines)
 
 
+# ── HTML rendering ──────────────────────────────────────────────────────────
+
+
+_HTML_STYLE = """
+body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+       margin: 2em; color: #1f2328; background: #ffffff; }
+h1 { margin-bottom: 0.2em; }
+h2 { margin-top: 1.6em; border-bottom: 1px solid #d0d7de; padding-bottom: 0.2em; }
+.meta { color: #57606a; font-size: 0.9em; margin-bottom: 1.5em; }
+.meta code { background: #f6f8fa; padding: 2px 6px; border-radius: 4px; }
+table { border-collapse: collapse; width: 100%; font-size: 0.95em; }
+th, td { border: 1px solid #d0d7de; padding: 6px 10px; text-align: left; }
+th { background: #f6f8fa; }
+td.num { text-align: right; font-variant-numeric: tabular-nums; }
+tr.regression { background: #ffebe9; }
+tr.improvement { background: #dafbe1; }
+.delta-pos { color: #cf222e; font-weight: 600; }
+.delta-neg { color: #1a7f37; font-weight: 600; }
+.delta-zero { color: #57606a; }
+.badge { display: inline-block; padding: 2px 8px; border-radius: 10px;
+         font-size: 0.8em; font-weight: 600; }
+.badge-ok { background: #dafbe1; color: #1a7f37; }
+.badge-bad { background: #ffebe9; color: #cf222e; }
+.notes { color: #57606a; font-style: italic; margin-top: 1em; }
+.empty { color: #57606a; font-style: italic; }
+"""
+
+
+def _fmt_html(value: float | None) -> str:
+    return "&mdash;" if value is None else f"{value:.3f}"
+
+
+def _delta_span(delta: float, higher_is_better: bool) -> str:
+    if delta == 0:
+        css = "delta-zero"
+    elif (delta > 0) == higher_is_better:
+        css = "delta-neg"  # good direction
+    else:
+        css = "delta-pos"  # bad direction
+    return f'<span class="{css}">{delta:+.3f}</span>'
+
+
+def render_html(report: TrendReport) -> str:
+    generated = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+    regression_set = set(id(r) for r in report.regressions)
+
+    status_badge = (
+        '<span class="badge badge-bad">REGRESSIONS DETECTED</span>'
+        if report.regressions
+        else '<span class="badge badge-ok">CLEAN</span>'
+    )
+
+    parts: list[str] = [
+        "<!DOCTYPE html>",
+        '<html lang="en"><head><meta charset="utf-8">',
+        "<title>AI Red-Team / Evaluator Trend Report</title>",
+        f"<style>{_HTML_STYLE}</style>",
+        "</head><body>",
+        "<h1>AI Red-Team / Evaluator Trend Report</h1>",
+        f'<div class="meta">Generated {html.escape(generated)} &middot; {status_badge}<br>',
+        f"baseline: <code>{html.escape(report.baseline_path)}</code><br>",
+        f"current: <code>{html.escape(report.current_path)}</code></div>",
+    ]
+
+    # ASR table
+    parts.append("<h2>Attack Success Rate (lower is better)</h2>")
+    if report.asr_changes:
+        parts.append("<table>")
+        parts.append(
+            "<thead><tr><th>Agent</th><th class='num'>Baseline</th>"
+            "<th class='num'>Current</th><th class='num'>&Delta;</th>"
+            "<th>Status</th></tr></thead><tbody>"
+        )
+        for c in report.asr_changes:
+            is_reg = id(c) in regression_set
+            is_impr = c.baseline is not None and c.delta < 0
+            row_cls = "regression" if is_reg else ("improvement" if is_impr else "")
+            status = (
+                "<span class='badge badge-bad'>regression</span>"
+                if is_reg
+                else "<span class='badge badge-ok'>ok</span>"
+            )
+            parts.append(
+                f"<tr class='{row_cls}'>"
+                f"<td>{html.escape(c.agent)}</td>"
+                f"<td class='num'>{_fmt_html(c.baseline)}</td>"
+                f"<td class='num'>{_fmt_html(c.current)}</td>"
+                f"<td class='num'>{_delta_span(c.delta, higher_is_better=False)}</td>"
+                f"<td>{status}</td></tr>"
+            )
+        parts.append("</tbody></table>")
+    else:
+        parts.append("<p class='empty'>No ASR data in current manifest.</p>")
+
+    # Metrics table
+    parts.append("<h2>Evaluator Metrics (higher is better)</h2>")
+    if report.metric_changes:
+        parts.append("<table>")
+        parts.append(
+            "<thead><tr><th>Agent</th><th>Metric</th><th class='num'>Baseline</th>"
+            "<th class='num'>Current</th><th class='num'>&Delta;</th>"
+            "<th>Status</th></tr></thead><tbody>"
+        )
+        for c in report.metric_changes:
+            is_reg = id(c) in regression_set
+            is_impr = c.baseline is not None and c.delta > 0
+            row_cls = "regression" if is_reg else ("improvement" if is_impr else "")
+            status = (
+                "<span class='badge badge-bad'>regression</span>"
+                if is_reg
+                else "<span class='badge badge-ok'>ok</span>"
+            )
+            parts.append(
+                f"<tr class='{row_cls}'>"
+                f"<td>{html.escape(c.agent)}</td>"
+                f"<td><code>{html.escape(c.metric)}</code></td>"
+                f"<td class='num'>{_fmt_html(c.baseline)}</td>"
+                f"<td class='num'>{_fmt_html(c.current)}</td>"
+                f"<td class='num'>{_delta_span(c.delta, higher_is_better=True)}</td>"
+                f"<td>{status}</td></tr>"
+            )
+        parts.append("</tbody></table>")
+    else:
+        parts.append("<p class='empty'>No evaluator metrics in current manifest.</p>")
+
+    if report.notes:
+        parts.append("<div class='notes'>")
+        parts.append("<strong>Notes:</strong><ul>")
+        for note in report.notes:
+            parts.append(f"<li>{html.escape(note)}</li>")
+        parts.append("</ul></div>")
+
+    parts.append("</body></html>")
+    return "\n".join(parts)
+
+
 # ── CLI ─────────────────────────────────────────────────────────────────────
 
 
@@ -363,6 +501,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--json", action="store_true", help="Emit machine-readable JSON instead of text."
     )
+    parser.add_argument(
+        "--html",
+        default=None,
+        help="Write a standalone HTML report to this path (in addition to stdout).",
+    )
     parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args(argv)
 
@@ -388,6 +531,12 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(report.to_dict(), indent=2))
     else:
         print(render_text(report))
+
+    if args.html:
+        html_path = Path(args.html)
+        html_path.parent.mkdir(parents=True, exist_ok=True)
+        html_path.write_text(render_html(report), encoding="utf-8")
+        log.info("Wrote HTML report to %s", html_path)
 
     if args.fail_on_regression and report.regressions:
         return 1
