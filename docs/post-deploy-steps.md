@@ -290,6 +290,54 @@ alerts. Run it against lab/demo tenants, not production, unless you
 have cleared it with your SOC.
 
 
+## Foundry portal Knowledge tab navigation map (what's empty by design)
+
+If you open the Foundry portal → **Knowledge** blade and one of the
+sub-tabs looks empty, that's expected. Here's where each piece of the
+lab's knowledge stack actually shows up:
+
+| Foundry portal location | What this lab puts there | How it's created |
+|---|---|---|
+| **Agents → `<agent>` → Tools → file_search** | 7 vector stores named `AISec-<agent>-knowledge` (HR, Finance, IT, Sales, Kusto, Entra, Defender), each with the demo doc corpus from `scripts/demo_docs/<agent_scope>/` | `scripts/foundry_knowledge.py upload` (Step 3 of `Deploy-Foundry`) |
+| **Knowledge → Indexes / Vector stores** | Same 7 vector stores surfaced as `ManagedAzureSearch` indexes (the data-plane `/indexes` endpoint backs this view) | Same as above |
+| **Connected resources → Azure AI Search** | One search service connection named `AISec-ai-search` pointing at `aisec-search-eastus` | `scripts/foundry_tools.py setup-connections` (Step 2) |
+| **Azure portal → AI Search → `aisec-search-eastus` → Indexes** | One hybrid + semantic index named `aisec-compliance-index` containing 21 docs (3 per agent_scope × 7 agents) tagged with the `agent_scope` filterable field | `scripts/foundry_search_index.py populate` (Step 3b) |
+| **Knowledge → Foundry IQ Knowledge bases** | **Empty by design.** Foundry IQ is a separate, newer (Ignite 2025) agentic-retrieval abstraction that wraps Azure AI Search + connections + reasoning. It is currently portal-only — there is no public REST API to create a Foundry IQ KB programmatically on the Standard Agent Setup tier. | Optional manual step (see below) |
+
+### Optional: create a Foundry IQ Knowledge base manually
+
+If you want to demo Foundry IQ's agentic retrieval (the "40% better
+relevance" demo), create one KB by hand in the portal — the lab does
+not automate this because the API surface is not yet public.
+
+1. Foundry portal → your project → **Knowledge** → **Foundry IQ
+   Knowledge bases** → **+ New knowledge base**.
+2. **Name:** `aisec-compliance-iq` (or per-agent, e.g. `aisec-hr-iq`).
+3. **Knowledge sources:**
+   - Add `aisec-compliance-index` from the connected `AISec-ai-search`
+     service. The portal will detect the hybrid + semantic config
+     and the `agent_scope` filterable field automatically.
+   - Optionally add the `AISec-blob-storage` connection if you want
+     Foundry IQ to also crawl the demo doc corpus directly from blob.
+4. **Retrieval settings:** leave defaults (agentic retrieval ON,
+   reasoning effort = medium).
+5. Wire the new KB into one or more agents via **Agents →
+   `<agent>` → Knowledge** → attach `aisec-compliance-iq`.
+
+The agents will continue to work without this step — they query the
+search index through the existing `azure_ai_search` tool (see Step 3b
+in [`CLAUDE.md`](../CLAUDE.md#three-layer-foundry-architecture)).
+Foundry IQ adds agentic query reformulation and multi-step retrieval
+on top, which is a meaningful UX improvement but not required for the
+core lab demo.
+
+**When this becomes automatable.** Once the Foundry IQ KB REST API
+ships GA, add a `scripts/foundry_iq.py` (mirroring the structure of
+`foundry_search_index.py`) and wire it into `Deploy-Foundry` as
+Step 3c. Tracking issue: <https://github.com/chashea/ai-agent-security/issues>
+(file one if missing).
+
+
 ## Verification
 
 After working through the manual steps, confirm with:

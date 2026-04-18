@@ -524,3 +524,41 @@ az search service update -n aisec-search-eastus -g rg-ai-agent-security \
 ```
 
 Then re-run the deploy (or just `python3.12 scripts/foundry_search_index.py --action populate`).
+
+## Foundry portal "Knowledge → Foundry IQ Knowledge bases" tab is empty
+
+**Symptom.** After a successful deploy, navigating to the Foundry
+portal → your project → **Knowledge** → **Foundry IQ Knowledge bases**
+shows "No knowledge bases" / empty state.
+
+**Root cause.** This is **expected**. Foundry IQ Knowledge Bases are
+a separate, newer (Ignite 2025) agentic-retrieval abstraction that
+wraps Azure AI Search indexes + project connections + reasoning. The
+lab does not create one automatically because the public REST API
+surface for Foundry IQ KBs is not yet exposed on the Standard Agent
+Setup project tier — every probe across `knowledgeBases`,
+`knowledgeSources`, `kb`, etc. and every preview api-version returns
+HTTP 400 (`API version not supported`) or 404.
+
+**What you should see populated.**
+
+- **Agents → `<agent>` → Tools → file_search** — 7 vector stores named
+  `AISec-<agent>-knowledge`.
+- **Knowledge → Indexes / Vector stores** — the same 7 stores
+  surfaced as `ManagedAzureSearch` indexes.
+- **Connected resources → Azure AI Search** — one connection
+  `AISec-ai-search`.
+- **Azure portal → AI Search → `aisec-search-eastus` → Indexes** —
+  one index `aisec-compliance-index` with 21 docs.
+
+**Fix (optional).** If you want the Foundry IQ tab populated for a
+demo, follow the manual portal flow in
+[`docs/post-deploy-steps.md`](post-deploy-steps.md#optional-create-a-foundry-iq-knowledge-base-manually).
+The lab agents will continue to function without this — they reach
+the same docs through the `file_search` and `azure_ai_search` tools.
+
+**When this stops being a manual step.** Once Microsoft ships a
+public REST API for Foundry IQ KBs, add a `scripts/foundry_iq.py`
+that mirrors the structure of `foundry_search_index.py` and wire it
+into `Deploy-Foundry` between Step 3b (search index population) and
+Step 4 (tool definition build).
