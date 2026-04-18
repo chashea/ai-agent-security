@@ -390,12 +390,22 @@ GitHub Actions (`validate.yml`) runs six jobs:
 5. **python-test** — `pytest scripts/tests/`
 6. **bicep-validate** — `az bicep build` on all templates in `infra/`
 
-## Pre-commit hook
+## Git hooks
 
-`.githooks/pre-commit` runs `ruff` on staged `scripts/**/*.py` and
-`PSScriptAnalyzer` (Warning level, same exclusions as CI) on staged
-`*.ps1` / `*.psm1` / `*.psd1`. Install with `./scripts/install-hooks.sh`.
-Only bypass with `git commit --no-verify` when the user explicitly asks.
+`./scripts/install-hooks.sh` wires both hooks via `core.hooksPath`:
+
+- **`.githooks/pre-commit`** runs `ruff` on staged `scripts/**/*.py`
+  and `PSScriptAnalyzer` (Warning level, same exclusions as CI) on
+  staged `*.ps1` / `*.psm1` / `*.psd1`. Fast (~2s).
+- **`.githooks/pre-push`** mirrors the full CI matrix: ruff, pytest,
+  PSScriptAnalyzer (repo-wide), Pester, `az bicep build` on every
+  `infra/*.bicep`, and the smoke-test. Skip individual jobs via env
+  (`SKIP_PYTEST=1`, `SKIP_PESTER=1`, `SKIP_BICEP=1`, `SKIP_PSSA=1`,
+  `SKIP_SMOKE=1`). Bypass entirely with `git push --no-verify` only
+  when the user explicitly asks.
+
+Only use `--no-verify` on either hook when the user explicitly
+authorizes it — hooks are load-bearing (catch real CI failures locally).
 
 ## Releases
 

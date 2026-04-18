@@ -280,22 +280,30 @@ publish idempotency, and more.
 
 ## Developer tooling
 
-### Pre-commit hook
+### Git hooks
 
-Mirrors CI checks locally so lint errors don't land on main:
+Mirrors CI checks locally so broken code doesn't land on main:
 
 ```bash
 ./scripts/install-hooks.sh
 ```
 
-Runs `ruff` on staged `scripts/**/*.py` and `PSScriptAnalyzer`
-(Warning+, same exclusions as `.github/workflows/validate.yml`) on
-staged `*.ps1` / `*.psm1` / `*.psd1`. Bypass only when explicitly
-instructed: `git commit --no-verify`.
+**Pre-commit** runs `ruff` on staged `scripts/**/*.py` and
+`PSScriptAnalyzer` (Warning+, same exclusions as
+`.github/workflows/validate.yml`) on staged `*.ps1` / `*.psm1` /
+`*.psd1`. Fast (~2s).
+
+**Pre-push** runs the full CI matrix — ruff, pytest, PSScriptAnalyzer,
+Pester, `az bicep build` on every `infra/*.bicep`, and the
+config-smoke-test — before any commit leaves the machine. Slow (~60s
+depending on pytest retries). Skip individual jobs with env vars
+(`SKIP_PYTEST=1`, `SKIP_PESTER=1`, `SKIP_BICEP=1`, `SKIP_PSSA=1`,
+`SKIP_SMOKE=1`) when iterating; bypass entirely with
+`git push --no-verify` only when explicitly instructed.
 
 ### Subagents / skills
 
-The same four specialized agents are available to both Claude Code
+Five specialized agents available to both Claude Code
 (`.claude/agents/*.md`) and GitHub Copilot CLI
 (`.github/copilot/skills/*/SKILL.md`). They auto-activate on matching
 triggers:
@@ -304,6 +312,7 @@ triggers:
 - **`foundry-verifier`** — read-only check that deployed agent tool definitions match `config.json`.
 - **`redteam-analyst`** — parses Step 8 red-team scorecards, ranks findings by ASR, and points at `infra/guardrails.bicep` / `config.json` for remediation.
 - **`evaluator-interpreter`** — interprets Step 7 evaluator output (trust boundaries, red team resilience, prompt vulnerability), flags regressions vs. prior runs.
+- **`triage-demo-validator`** — reads `logs/security-triage-demo-*.json`, flags hallucinations, silent refusals, scope violations (the read-only triage agent proposing destructive actions), KQL/OData sanity issues, and PII posture lapses in the Security-Triage agent's responses.
 
 ### MCP servers
 

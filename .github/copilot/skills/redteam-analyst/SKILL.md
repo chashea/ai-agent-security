@@ -28,6 +28,8 @@ Read these before drawing conclusions:
 - `docs/troubleshooting.md` — if a failure looks like a known deploy-time issue (not a model safety issue), hand off to `foundry-troubleshooter`.
 - `logs/AIAgentSec_*.log` — most recent deploy log for the Step 8 output.
 - Prior scorecards in `logs/redteam_*.json` (if the run was persisted) for trend analysis.
+- `logs/redteam-trend-*.html` — auto-generated trend HTML (v0.11+) rendered by `scripts/trend_redteam.py --html` after every Step 8. Open the newest file to see per-agent ASR table, evaluator metric drift, and highlighted regressions at a glance before digging into the raw scorecard.
+- `manifests/<prefix>_<timestamp>.json` — `data.foundry.redTeaming.agentScans[].scorecard` for the canonical scorecard JSON the trend script reads.
 
 ## Analysis protocol
 
