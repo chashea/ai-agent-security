@@ -230,7 +230,9 @@ var policyXml = '''
 '''
 
 var quotaAttributes = monthlyTokenQuota > 0 ? 'token-quota="${monthlyTokenQuota}" token-quota-period="Monthly" remaining-quota-tokens-variable-name="remainingQuotaTokens"' : ''
-var emitMetricPolicy = empty(appInsightsResourceId) ? '' : '<llm-emit-token-metric namespace="aisec-aigateway"><dimension name="Subscription ID" /><dimension name="Deployment" value="@(context.Request.MatchedParameters[\\"deployment-id\\"])" /></llm-emit-token-metric>'
+// Note: inside an XML attribute value the C# expression `context.Request.MatchedParameters["deployment-id"]`
+// must encode its inner quotes as &quot; or APIM's XML parser terminates the attribute at the first inner `"`.
+var emitMetricPolicy = empty(appInsightsResourceId) ? '' : '<llm-emit-token-metric namespace="aisec-aigateway"><dimension name="Subscription ID" /><dimension name="Deployment" value="@(context.Request.MatchedParameters[&quot;deployment-id&quot;])" /></llm-emit-token-metric>'
 
 resource openaiApiPolicy 'Microsoft.ApiManagement/service/apis/policies@2024-06-01-preview' = {
   parent: openaiApi

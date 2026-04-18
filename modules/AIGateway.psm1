@@ -100,7 +100,7 @@ function Deploy-AIGateway {
     }
 
     if ($PSCmdlet.ShouldProcess("$apimName in $resourceGroup", "Deploy-AIGateway (Bicep)")) {
-        Write-LabStep -Message "Deploying AI Gateway ($apimName, SKU $skuName) — this can take 15-45 minutes for APIM first-time provision"
+        Write-LabStep -StepName 'AIGateway' -Description "Deploying $apimName (SKU $skuName) — APIM first-time provision takes 15-45 minutes"
 
         # Pass-through to az deployment group create. az CLI is already the
         # standard for Bicep deploys in this repo (see FoundryInfra.psm1).
@@ -120,7 +120,14 @@ function Deploy-AIGateway {
         if ($LASTEXITCODE -ne 0) {
             throw "AI Gateway Bicep deploy failed: $output"
         }
-        $outputs = $output | ConvertFrom-Json
+        # az CLI prints Bicep upgrade warnings to stderr; 2>&1 merges them into
+        # $output. Strip any prefix before the first '{' or '[' before parsing.
+        $outputText = ($output | Out-String)
+        $jsonStart  = $outputText.IndexOfAny([char[]]@('{','['))
+        if ($jsonStart -lt 0) {
+            throw "AI Gateway Bicep deploy returned no JSON output. Raw: $outputText"
+        }
+        $outputs = $outputText.Substring($jsonStart) | ConvertFrom-Json
 
         # Fetch the starter subscription's primary key (not exposed as a Bicep
         # output — must be read via data-plane listSecrets).
@@ -129,10 +136,22 @@ function Deploy-AIGateway {
             --uri "/subscriptions/$subscriptionId/resourceGroups/$resourceGroup/providers/Microsoft.ApiManagement/service/$apimName/subscriptions/aisec-demo/listSecrets?api-version=2024-06-01-preview" `
             --subscription $subscriptionId `
             --query 'primaryKey' -o tsv 2>&1
-        if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($keyResult)) {
-            $subKey = [string]$keyResult
+        # az rest can emit Python deprecation / bicep upgrade warnings on stderr
+        # that get merged into $keyResult via 2>&1. Pick the first non-warning,
+        # non-empty line as the key.
+        if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace("$keyResult")) {
+            $candidateKey = @($keyResult) | Where-Object {
+                $line = [string]$_
+                $line -and
+                -not $line.StartsWith('WARNING', [StringComparison]::OrdinalIgnoreCase) -and
+                -not $line.StartsWith('ERROR', [StringComparison]::OrdinalIgnoreCase) -and
+                -not $line.Contains('SyntaxWarning')
+            } | Select-Object -First 1
+            if ($candidateKey) {
+                $subKey = [string]$candidateKey
+            }
         }
-        else {
+        if ([string]::IsNullOrWhiteSpace($subKey)) {
             Write-LabLog -Message "Could not fetch starter subscription key: $keyResult" -Level Warning
         }
 
@@ -195,7 +214,7 @@ function Remove-AIGateway {
     }
 
     if ($PSCmdlet.ShouldProcess("$apimName in $resourceGroup", 'Remove-AIGateway')) {
-        Write-LabStep -Message "Removing AI Gateway ($apimName) — APIM deletion can take 15-30 minutes"
+        Write-LabStep -StepName 'AIGateway' -Description "Removing $apimName — APIM deletion can take 15-30 minutes"
 
         $null = & az apim show --name $apimName --resource-group $resourceGroup --subscription $subscriptionId --query 'id' -o tsv 2>&1
         if ($LASTEXITCODE -ne 0) {

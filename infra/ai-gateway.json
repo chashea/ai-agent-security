@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.39.26.7824",
-      "templateHash": "12439799475468379051"
+      "templateHash": "16841005057668130223"
     }
   },
   "parameters": {
@@ -110,7 +110,7 @@
     "cognitiveServicesOpenAIUserRoleId": "5e0bd9bd-7b93-4f28-af87-19fc36ad61bd",
     "policyXml": "<policies>\n  <inbound>\n    <base />\n    <authentication-managed-identity resource=\"https://cognitiveservices.azure.com\" />\n    <set-backend-service backend-id=\"foundry-aoai\" />\n    <llm-token-limit\n      counter-key=\"@(context.Subscription.Id)\"\n      tokens-per-minute=\"{0}\"\n      estimate-prompt-tokens=\"false\"\n      {1}\n      remaining-tokens-variable-name=\"remainingTokens\" />\n    {2}\n  </inbound>\n  <backend>\n    <base />\n  </backend>\n  <outbound>\n    <base />\n  </outbound>\n  <on-error>\n    <base />\n  </on-error>\n</policies>\n",
     "quotaAttributes": "[if(greater(parameters('monthlyTokenQuota'), 0), format('token-quota=\"{0}\" token-quota-period=\"Monthly\" remaining-quota-tokens-variable-name=\"remainingQuotaTokens\"', parameters('monthlyTokenQuota')), '')]",
-    "emitMetricPolicy": "[if(empty(parameters('appInsightsResourceId')), '', '<llm-emit-token-metric namespace=\"aisec-aigateway\"><dimension name=\"Subscription ID\" /><dimension name=\"Deployment\" value=\"@(context.Request.MatchedParameters[\\\"deployment-id\\\"])\" /></llm-emit-token-metric>')]"
+    "emitMetricPolicy": "[if(empty(parameters('appInsightsResourceId')), '', '<llm-emit-token-metric namespace=\"aisec-aigateway\"><dimension name=\"Subscription ID\" /><dimension name=\"Deployment\" value=\"@(context.Request.MatchedParameters[&quot;deployment-id&quot;])\" /></llm-emit-token-metric>')]"
   },
   "resources": [
     {
