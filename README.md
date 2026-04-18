@@ -171,7 +171,7 @@ Each workload under `workloads` has an `enabled` boolean. Set to `false` to skip
 
 ## Agents
 
-The Foundry workload deploys 7 agents. Each agent's tools are auto-derived
+The Foundry workload deploys 5 agents. Each agent's tools are auto-derived
 for RBAC assignment by the `agentIdentity` workload.
 
 | Agent | Tools |
@@ -180,9 +180,7 @@ for RBAC assignment by the `agentIdentity` workload.
 | Finance-Analyst | `code_interpreter`, `file_search`, `azure_ai_search`, `azure_function`, `sharepoint_grounding`, `a2a`* |
 | IT-Support | `code_interpreter`, `file_search`, `azure_ai_search`, `openapi`, `mcp`, `a2a`* |
 | Sales-Research | `code_interpreter`, `file_search`, `bing_grounding`, `image_generation`, `a2a`* |
-| Kusto-Analyst | `code_interpreter`, `file_search`, `azure_ai_search`, `azure_function` |
-| Entra-Specialist | `code_interpreter`, `file_search`, `azure_ai_search`, `openapi` |
-| Defender-Analyst | `code_interpreter`, `file_search`, `azure_ai_search`, `mcp` |
+| Security-Triage | `openapi` (Graph Security API), `code_interpreter` |
 
 \* `a2a` (agent-to-agent) requires `workloads.foundry.connections.a2a` in config so an Agent2Agent project connection is provisioned and wired into the `a2a_preview` tool via `project_connection_id`.
 

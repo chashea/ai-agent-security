@@ -14,8 +14,7 @@ to `Deploy-FoundryBicep` in `modules/FoundryInfra.psm1`.
 - Hybrid: keyword + HNSW vector (1536-dim, `text-embedding-3-small`)
 - Semantic config name: `aisec-semantic`
 - Filterable field: `agent_scope` (string) — values match the agent
-  shortName: HR-Helpdesk, Finance-Analyst, IT-Support, Sales-Research,
-  Kusto-Analyst, Entra-Specialist, Defender-Analyst.
+  shortName: HR-Helpdesk, Finance-Analyst, IT-Support, Sales-Research.
 - Idempotent upload: `mergeOrUpload` on stable doc IDs derived from
   source filename + chunk index.
 

@@ -2,7 +2,7 @@
 """Foundry agent operations using the Azure AI Projects SDK.
 
 Handles agent CRUD, Purview governance toggle, and application publishing.
-Called by the PowerShell orchestrator (Foundry.psm1) with JSON input on a
+Called by the PowerShell driver (Foundry.psm1) with JSON input on a
 temp file and returns JSON manifest to stdout.
 
 Usage:
@@ -418,71 +418,6 @@ def deploy(config: dict) -> dict:
         )
         if base_url:
             agent["baseUrl"] = base_url
-
-    # 4. Orchestrator agent (Connected Agents pattern) — created AFTER all
-    # specialists exist so we can wire each one in as a connected_agent tool.
-    # Foundry's connected_agent tool definition uses a nested shape with a
-    # short snake_case name, while function tools use a flat top-level shape.
-    orchestrator_cfg = config.get("orchestrator")
-    if orchestrator_cfg and orchestrator_cfg.get("enabled") and agents:
-        orch_name = f"{prefix}-{orchestrator_cfg.get('name', 'Orchestrator')}"
-        orch_tools: list[dict] = []
-        for agent in agents:
-            short = (
-                agent["name"].replace(f"{prefix}-", "").lower().replace("-", "_")
-            )
-            orch_tools.append(
-                {
-                    "type": "connected_agent",
-                    "connected_agent": {
-                        "name": short,
-                        "description": f"Delegate to the {agent['name']} specialist for tasks in its domain.",
-                        "id": agent["name"],
-                    },
-                }
-            )
-        for fn_tool in orchestrator_cfg.get("functionTools", []) or []:
-            orch_tools.append(
-                {
-                    "type": "function",
-                    "name": fn_tool.get("name"),
-                    "description": fn_tool.get("description", ""),
-                    "parameters": fn_tool.get(
-                        "parameters", {"type": "object", "properties": {}}
-                    ),
-                }
-            )
-        orch_app_name = orch_name if user_security_context_enabled else None
-        orch_result = create_agent(
-            project_endpoint=project_endpoint,
-            data_token=data_token,
-            agent_api_version=agent_api_version,
-            agent_name=orch_name,
-            model=orchestrator_cfg.get("model", "gpt-4o"),
-            instructions=orchestrator_cfg.get(
-                "instructions",
-                "You are a routing orchestrator. Delegate tasks to the most appropriate connected specialist agent.",
-            ),
-            description=orchestrator_cfg.get(
-                "description", "Routes tasks to specialist agents."
-            ),
-            tools=orch_tools,
-            application_name=orch_app_name,
-        )
-        if orch_result:
-            orch_result["toolCount"] = len(orch_tools)
-            if orch_app_name:
-                orch_result["applicationName"] = orch_app_name
-            base_url = publish_application(
-                account_path=account_path,
-                project_name=project_name,
-                arm_token=arm_token,
-                app_api_version=app_api_version,
-                agent_name=orch_name,
-            )
-            if base_url:
-                orch_result["baseUrl"] = base_url
-            agents.append(orch_result)
 
     return {
         "purviewIntegrationEnabled": purview_enabled,

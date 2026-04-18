@@ -128,10 +128,9 @@ FoundryInfra.psm1               foundry_tools.py               foundry-eval-infr
    `agent_scope` filterable field. Embeddings come from the existing
    `text-embedding-3-small` deployment via `DefaultAzureCredential`.
    Idempotent (`mergeOrUpload` on stable doc IDs). Required because
-   six agents (`HR-Helpdesk`, `Finance-Analyst`, `IT-Support`,
-   `Kusto-Analyst`, `Entra-Specialist`, `Defender-Analyst`) declare
-   an `azure_ai_search` tool — without this step the index doesn't
-   exist and queries silently return zero results.
+   three agents (`HR-Helpdesk`, `Finance-Analyst`, `IT-Support`)
+   declare an `azure_ai_search` tool — without this step the index
+   doesn't exist and queries silently return zero results.
 4. `foundry_tools.py build-tools` builds per-agent tool definition dicts,
    injecting vector store IDs + connection IDs.
 5. `foundry_agents.py deploy` creates agents via `azure-ai-projects` SDK and

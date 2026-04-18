@@ -30,18 +30,18 @@
       "purviewDataSecurity": {
         "enable": true,
         "method": "defenderForCloud",
-        "notes": "Prerequisite for Purview to see Foundry prompts/responses. See docs/foundry-purview-integration.md \u00a71. Toggle via Defender for Cloud ai-onboarding or Foundry portal compliance settings. Automatic enablement is out of scope for this repo; this block records the intent and is surfaced as a warning by Deploy-Foundry if the subscription has not been onboarded."
+        "notes": "Prerequisite for Purview to see Foundry prompts/responses. See docs/foundry-purview-integration.md §1. Toggle via Defender for Cloud ai-onboarding or Foundry portal compliance settings. Automatic enablement is out of scope for this repo; this block records the intent and is surfaced as a warning by Deploy-Foundry if the subscription has not been onboarded."
       },
       "userSecurityContext": {
         "enabled": true,
-        "notes": "Purview Data Security Policies only enforce against Foundry calls that use an Entra user-context token or explicit userSecurityContext. See docs/foundry-purview-integration.md \u00a73. Propagation through scripts/foundry_agents.py is out of scope for this repo; this flag records the intent."
+        "notes": "Purview Data Security Policies only enforce against Foundry calls that use an Entra user-context token or explicit userSecurityContext. See docs/foundry-purview-integration.md §3. Propagation through scripts/foundry_agents.py is out of scope for this repo; this flag records the intent."
       },
       "purviewProcessContent": {
         "enabled": false,
         "failMode": "open",
         "enforceOnPrompt": true,
         "enforceOnResponse": true,
-        "notes": "Opt-in runtime bridge from the bot Function App to Microsoft Graph /dataSecurityAndGovernance/{processContent,protectionScopes/compute}. When enabled, each bot turn sends prompt (uploadText) and response (downloadText) into Purview \u2014 prompts/responses flow into Audit + DSPM Activity Explorer with classifications. Enforcement (DLP block) requires a user-context token (v0.7 follow-on via Bot Framework SSO); today's app-context MSI path is audit-only per docs/foundry-purview-integration.md \u00a73. failMode=open means Graph errors fall through to the model; enforceOnPrompt/Response toggle short-circuiting when policy actions include restrictAccess."
+        "notes": "Opt-in runtime bridge from the bot Function App to Microsoft Graph /dataSecurityAndGovernance/{processContent,protectionScopes/compute}. When enabled, each bot turn sends prompt (uploadText) and response (downloadText) into Purview — prompts/responses flow into Audit + DSPM Activity Explorer with classifications. Enforcement (DLP block) requires a user-context token (v0.7 follow-on via Bot Framework SSO); today's app-context MSI path is audit-only per docs/foundry-purview-integration.md §3. failMode=open means Graph errors fall through to the model; enforceOnPrompt/Response toggle short-circuiting when policy actions include restrictAccess."
       },
       "connections": {
         "aiSearch": {
@@ -84,21 +84,6 @@
           "sales_competitive_analysis.md",
           "sales_pricing_guide.md",
           "sales_prospect_playbook.md"
-        ],
-        "Kusto-Analyst": [
-          "kql_cheat_sheet.md",
-          "kql_sentinel_hunting.md",
-          "kql_appinsights_patterns.md"
-        ],
-        "Entra-Specialist": [
-          "entra_rbac_model.md",
-          "entra_conditional_access_patterns.md",
-          "entra_app_registrations.md"
-        ],
-        "Defender-Analyst": [
-          "defender_incident_triage.md",
-          "defender_mitre_mapping.md",
-          "defender_sentinel_playbooks.md"
         ]
       },
       "evaluations": {
@@ -207,29 +192,6 @@
         ],
         "numTurns": 5
       },
-      "orchestrator": {
-        "enabled": true,
-        "name": "Orchestrator",
-        "model": "gpt-4o",
-        "description": "Routes each request to the most appropriate specialist agent.",
-        "instructions": "You are the AISec routing orchestrator. For each user request, identify the single best-fit specialist among the connected agents (HR, Finance, IT, Sales, Kusto, Security-Triage, Defender-IR, Purview-Governance) and delegate via the matching connected_agent tool. If a specific user or account is mentioned, call the get_user_risk_score function first to pull their risk context, then include that score when delegating. Do not answer domain questions yourself — always delegate.",
-        "functionTools": [
-          {
-            "name": "get_user_risk_score",
-            "description": "Look up the identity risk score for a given user principal name (UPN). Returns a composite 0-100 risk score drawn from Entra ID Protection, Defender, and Purview Insider Risk signals.",
-            "parameters": {
-              "type": "object",
-              "properties": {
-                "upn": {
-                  "type": "string",
-                  "description": "User principal name, e.g. alice@contoso.com"
-                }
-              },
-              "required": ["upn"]
-            }
-          }
-        ]
-      },
       "agents": [
         {
           "name": "HR-Helpdesk",
@@ -277,7 +239,7 @@
         {
           "name": "Finance-Analyst",
           "description": "Financial data analysis and reporting assistant",
-          "instructions": "You are a finance assistant for Contoso. Help analyze financial summaries, expense reports, and budget forecasts. Be accurate and thorough. Handle financial data with care \u2014 do not share account numbers, credit card data, or confidential financial reports with users who are not authorized to access them.",
+          "instructions": "You are a finance assistant for Contoso. Help analyze financial summaries, expense reports, and budget forecasts. Be accurate and thorough. Handle financial data with care — do not share account numbers, credit card data, or confidential financial reports with users who are not authorized to access them.",
           "model": "gpt-4o",
           "tools": [
             {
@@ -415,7 +377,7 @@
         {
           "name": "Sales-Research",
           "description": "Market research and competitive intelligence assistant",
-          "instructions": "You are a sales research assistant for Contoso. Help with market analysis, competitive intelligence, and customer prospect research. Handle customer data in accordance with company privacy policy \u2014 do not share personally identifiable information or confidential business strategy with external parties.",
+          "instructions": "You are a sales research assistant for Contoso. Help with market analysis, competitive intelligence, and customer prospect research. Handle customer data in accordance with company privacy policy — do not share personally identifiable information or confidential business strategy with external parties.",
           "model": "gpt-4o",
           "tools": [
             {
@@ -436,143 +398,8 @@
           ]
         },
         {
-          "name": "Kusto-Analyst",
-          "description": "KQL query authoring for Log Analytics, Sentinel, and Application Insights",
-          "instructions": "You are a KQL (Kusto Query Language) authoring assistant. Help users write, debug, and optimize queries for Azure Log Analytics, Microsoft Sentinel, and Application Insights. Explain query patterns, join strategies, and time-series functions. Never fabricate table schemas \u2014 if you are unsure about a table's column layout, ask the user for the actual schema or tell them how to discover it with `getschema`.",
-          "model": "gpt-4o",
-          "tools": [
-            {
-              "type": "code_interpreter"
-            },
-            {
-              "type": "file_search"
-            },
-            {
-              "type": "azure_ai_search",
-              "indexName": "aisec-compliance-index"
-            },
-            {
-              "type": "azure_function",
-              "config": {
-                "name": "run_kql_query",
-                "description": "Execute a KQL query against a Log Analytics workspace and return the result set",
-                "parameters": {
-                  "type": "object",
-                  "properties": {
-                    "workspaceId": {
-                      "type": "string",
-                      "description": "Log Analytics workspace ID"
-                    },
-                    "query": {
-                      "type": "string",
-                      "description": "KQL query string"
-                    },
-                    "timespan": {
-                      "type": "string",
-                      "description": "ISO-8601 duration (e.g., PT1H)"
-                    }
-                  },
-                  "required": [
-                    "workspaceId",
-                    "query"
-                  ]
-                },
-                "queueEndpoint": "https://pvfoundrybotstorage.queue.core.windows.net",
-                "queueName": "kusto-tasks",
-                "outputQueueName": "kusto-results"
-              }
-            }
-          ]
-        },
-        {
-          "name": "Entra-Specialist",
-          "description": "Microsoft Entra ID identity, RBAC, Conditional Access, and app registration advisor",
-          "instructions": "You are a Microsoft Entra ID specialist. Help users design RBAC assignments, Conditional Access policies, app registration OAuth flows, and cross-tenant configurations. Always follow least-privilege principles \u2014 when asked for a role, prefer the most specific built-in role over Owner/Contributor, and only suggest custom roles when no built-in fits. Never fabricate role names, GUIDs, or scopes.",
-          "model": "gpt-4o",
-          "tools": [
-            {
-              "type": "code_interpreter"
-            },
-            {
-              "type": "file_search"
-            },
-            {
-              "type": "azure_ai_search",
-              "indexName": "aisec-compliance-index"
-            },
-            {
-              "type": "openapi",
-              "config": {
-                "name": "microsoft_graph",
-                "description": "Microsoft Graph API \u2014 identity, users, groups, role assignments, and Conditional Access",
-                "url": "https://graph.microsoft.com/v1.0",
-                "paths": {
-                  "/users/{id}": {
-                    "get": {
-                      "operationId": "getUser",
-                      "summary": "Get a user by object id or userPrincipalName",
-                      "parameters": [
-                        {
-                          "name": "id",
-                          "in": "path",
-                          "required": true,
-                          "schema": {
-                            "type": "string"
-                          }
-                        }
-                      ],
-                      "responses": {
-                        "200": {
-                          "description": "User object"
-                        }
-                      }
-                    }
-                  },
-                  "/roleManagement/directory/roleAssignments": {
-                    "get": {
-                      "operationId": "listDirectoryRoleAssignments",
-                      "summary": "List Entra directory role assignments",
-                      "responses": {
-                        "200": {
-                          "description": "Role assignment list"
-                        }
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          ]
-        },
-        {
-          "name": "Defender-Analyst",
-          "description": "Microsoft Defender XDR and Sentinel incident triage and threat-hunting assistant",
-          "instructions": "You are a security analyst specializing in Microsoft Defender XDR, Defender for Cloud, and Microsoft Sentinel. Help triage incidents, map findings to MITRE ATT&CK tactics and techniques, recommend hunting queries, and suggest remediation steps. Prioritize responses by severity, always cite the specific detection source (product + rule name), and never speculate about the identity of a threat actor without telemetry evidence.",
-          "model": "gpt-4o",
-          "tools": [
-            {
-              "type": "code_interpreter"
-            },
-            {
-              "type": "file_search"
-            },
-            {
-              "type": "azure_ai_search",
-              "indexName": "aisec-compliance-index"
-            },
-            {
-              "type": "mcp",
-              "config": {
-                "serverLabel": "sentinel-mcp",
-                "serverUrl": "https://sentinel-mcp.contoso.com/mcp",
-                "requireApproval": "never"
-              }
-            }
-          ]
-        },
-        {
           "name": "Security-Triage",
-          "description": "Read-only security triage assistant for SOC analysts \u2014 investigates Defender XDR incidents, DLP alerts, and Advanced Hunting via Microsoft Graph Security API",
+          "description": "Read-only security triage assistant for SOC analysts — investigates Defender XDR incidents, DLP alerts, and Advanced Hunting via Microsoft Graph Security API",
           "instructions": "You are a read-only security triage assistant. You help SOC analysts and data security teams investigate Defender XDR incidents and Microsoft Purview DLP alerts through the Microsoft Graph Security API.\n\nYou have NO write permissions. You cannot modify, close, or reassign incidents. You cannot take response actions on devices, quarantine files, or disable accounts. You report what telemetry shows. If an analyst asks you to take a response action, decline and direct them to the Defender portal or their SOAR playbook.\n\n--- TOOLS ---\n\nYou have the following tools:\n\n- listIncidents: GET /security/incidents. Supports OData $filter, $top, $orderby. Use for listing, filtering, and retrieving incident metadata.\n- runHuntingQuery: POST /security/runHuntingQuery. Body: { \"Query\": \"<KQL>\", \"Timespan\": \"<ISO 8601>\" }. Use for Advanced Hunting KQL queries across all Defender tables.\n- getIncident: GET /security/incidents/{id}. Use for retrieving a single incident with correlated alerts.\n- listAlerts: GET /security/alerts_v2. Supports OData $filter, $top, $orderby. Use for listing alerts independent of incidents.\n- getAlert: GET /security/alerts_v2/{id}. Use for full alert detail with evidence.\n- getThreatIntelHost: GET /security/threatIntelligence/hosts/{hostName}. Use for enriching a hostname/domain with threat intelligence.\n\n--- PRIVACY DEFAULTS ---\n\nDefault to aggregate counts and patterns over raw PII. Surface specific UPNs, file names, file paths, and device names ONLY when the analyst explicitly requests them.\n\nWhen listing affected users: default to count (e.g., \"12 users were affected across 3 departments\").\nWhen listing files: default to classification label and count (e.g., \"7 files labeled Confidential were shared externally\").\nWhen listing devices: default to count and OS breakdown.\n\nNever speculate about attribution, motive, or intent behind an incident. Report observable facts from telemetry only. Report zero-result queries explicitly. Do not silently widen the search scope.\n\n--- KQL DISCIPLINE ---\n\nEvery KQL query MUST include a time bound. Use the Timespan parameter or an explicit where Timestamp > ago(...) clause.\n\nDefault time window: 24 hours. Expand only when the analyst requests it.\n\nPrefer summarize aggregations over raw result dumps. Always limit output with | top 50 or | take 100. Never run open-ended queries without entity/action/severity filters.\n\n--- RATE BUDGET ---\n\nAdvanced Hunting: 15 calls/min, 1500 calls/hour (tenant-wide). Batch related investigations into fewer queries. Run sequentially, not in parallel. On HTTP 429, inform the analyst and do not auto-retry.\n\n--- RESPONSE FORMAT ---\n\n1. Lead with a 1-2 sentence executive summary.\n2. Use markdown tables for multi-row results.\n3. Severity: high=red, medium=orange, low=yellow, informational=white.\n4. Always include portal links for incidents and alerts.\n5. Timestamps in UTC.\n6. For incident summaries: Status | Severity | Assigned | Created | Updated | Alert count | Entities.\n7. Do not emit raw JSON. Always transform into readable format.\n\n--- ERROR HANDLING ---\n\nHTTP 403: Inform analyst about missing permissions. HTTP 429: Report rate limit and retry-after. Empty results: State explicitly and suggest adjustments. HTTP 400 (KQL): Show error, fix and retry once. Never fabricate data.\n\n--- SCOPE ---\n\nScoped to security investigation only. Decline code generation, non-security Graph queries, general IT questions. Direct response action requests to the Defender portal.",
           "model": "gpt-4o",
           "tools": [
@@ -830,16 +657,16 @@
           "sublabels": [
             {
               "name": "AI-Accessible",
-              "tooltip": "No encryption \u2014 content can be retrieved by Foundry RAG and AI indexing pipelines",
+              "tooltip": "No encryption — content can be retrieved by Foundry RAG and AI indexing pipelines",
               "encryption": false
             },
             {
               "name": "AI-Protected",
-              "tooltip": "Encrypted \u2014 user-context token required; retrievable by RAG only for authorized users",
+              "tooltip": "Encrypted — user-context token required; retrievable by RAG only for authorized users",
               "encryption": true,
               "contentMarking": {
                 "headerText": "CONFIDENTIAL - AI Protected",
-                "footerText": "Protected content \u2014 AI access requires user authorization"
+                "footerText": "Protected content — AI access requires user authorization"
               }
             }
           ]
@@ -851,7 +678,7 @@
           "sublabels": [
             {
               "name": "AI-Restricted",
-              "tooltip": "Encrypted \u2014 blocked from AI indexing and RAG retrieval; human review only",
+              "tooltip": "Encrypted — blocked from AI indexing and RAG retrieval; human review only",
               "encryption": true,
               "contentMarking": {
                 "headerText": "HIGHLY CONFIDENTIAL - AI Restricted",
@@ -860,7 +687,7 @@
             },
             {
               "name": "Executives-Only",
-              "tooltip": "Encrypted \u2014 restricted to executive group; not accessible via AI agents",
+              "tooltip": "Encrypted — restricted to executive group; not accessible via AI agents",
               "encryption": true,
               "contentMarking": {
                 "headerText": "HIGHLY CONFIDENTIAL - Executives Only",
@@ -886,7 +713,7 @@
       "aiSearchEnforcement": {
         "enabled": true,
         "indexName": "aisec-compliance-index",
-        "notes": "Honor sensitivity labels at RAG query time. Requires AI Search sensitivity-label indexing (public preview) on the index, plus Content.SuperUser + UnifiedPolicy.Tenant.Read on the AI Search system-assigned managed identity. See docs/foundry-purview-integration.md \u00a75.5.",
+        "notes": "Honor sensitivity labels at RAG query time. Requires AI Search sensitivity-label indexing (public preview) on the index, plus Content.SuperUser + UnifiedPolicy.Tenant.Read on the AI Search system-assigned managed identity. See docs/foundry-purview-integration.md §5.5.",
         "managedIdentityRoles": [
           "Content.SuperUser",
           "UnifiedPolicy.Tenant.Read"
@@ -895,7 +722,7 @@
     },
     "conditionalAccess": {
       "enabled": true,
-      "notes": "Adjacent identity control \u2014 NOT part of the Microsoft Foundry \u00d7 Purview capability matrix. See docs/foundry-purview-integration.md \u00a77. Deployed as a defense-in-depth layer around agent principals, not as a Purview-for-Foundry control.",
+      "notes": "Adjacent identity control — NOT part of the Microsoft Foundry × Purview capability matrix. See docs/foundry-purview-integration.md §7. Deployed as a defense-in-depth layer around agent principals, not as a Purview-for-Foundry control.",
       "policies": [
         {
           "name": "AI Agent MFA Required",
@@ -920,7 +747,7 @@
     "mdca": {
       "enabled": true,
       "portalUrl": "",
-      "notes": "Adjacent SaaS control (Microsoft Defender for Cloud Apps) \u2014 NOT part of the Microsoft Foundry \u00d7 Purview capability matrix. See docs/foundry-purview-integration.md \u00a77.",
+      "notes": "Adjacent SaaS control (Microsoft Defender for Cloud Apps) — NOT part of the Microsoft Foundry × Purview capability matrix. See docs/foundry-purview-integration.md §7.",
       "policies": [
         {
           "name": "AI Agent Session Monitor",

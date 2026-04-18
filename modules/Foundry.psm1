@@ -438,21 +438,6 @@ function Deploy-Foundry {
         $fw.userSecurityContext -and
         [bool]$fw.userSecurityContext.enabled
     )
-    if ($fw.PSObject.Properties['orchestrator'] -and $fw.orchestrator) {
-        $orchCfg = @{}
-        foreach ($prop in $fw.orchestrator.PSObject.Properties) {
-            if ($prop.Name -eq 'functionTools' -and $prop.Value) {
-                $orchCfg[$prop.Name] = @($prop.Value | ForEach-Object {
-                    $fnHash = @{}
-                    foreach ($p in $_.PSObject.Properties) { $fnHash[$p.Name] = $p.Value }
-                    $fnHash
-                })
-            } else {
-                $orchCfg[$prop.Name] = $prop.Value
-            }
-        }
-        $agentInput['orchestrator'] = $orchCfg
-    }
 
     try {
         $agentManifest = Invoke-FoundryPython -ScriptName 'foundry_agents.py' -Action 'deploy' -InputData $agentInput
