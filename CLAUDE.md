@@ -74,6 +74,15 @@ az bicep build --file infra/bot-services.bicep
 az bicep build --file infra/bot-per-agent.bicep
 az bicep build --file infra/defender-posture.bicep
 az bicep build --file infra/guardrails.bicep
+
+# Deploy + fire adversarial traffic at end to light up detections
+./Deploy.ps1 -ConfigPath config.json -AdversarialTraffic
+
+# Security-Triage demo: Defender XDR alerts → Foundry triage agent
+python3.12 scripts/demo_security_triage.py --since-minutes 60 --top 3
+
+# Red-team trend HTML report (auto-runs after Step 8 in Deploy.ps1)
+python3.12 scripts/trend_redteam.py --html logs/trend.html
 ```
 
 ## Architecture
@@ -188,28 +197,34 @@ Exceptions: `Prerequisites.psm1`, `Logging.psm1`, `Interactive.psm1`, and `Found
 - **Parameter fallback**: Modules use `Get-LabSupportedParameterName` to detect cmdlet capability at runtime, since parameter names vary across module versions.
 - **Post-deploy validation** (Deploy.ps1): Retries 6 times with 5-second delays to handle Microsoft Graph eventual consistency lag.
 - **Long-running operations**: Foundry uses `Wait-ArmAsyncOperation` in FoundryInfra.psm1.
-- **PowerShell-to-Python interface**: `Invoke-FoundryPython` helper writes JSON config to a temp file, invokes `python3.12 scripts/<script>.py --action <verb> --config <path>`, captures JSON manifest from stdout. Six Python scripts: `foundry_agents.py` (agent CRUD), `foundry_tools.py` (connections + tool definitions), `foundry_knowledge.py` (vector stores + doc upload), `foundry_search_index.py` (Azure AI Search index lifecycle + doc upload with embeddings), `foundry_evals.py` (evaluations pipeline), `foundry_redteam.py` (AI Red Teaming). API versions are passed from PowerShell (single source of truth).
+- **PowerShell-to-Python interface**: `Invoke-FoundryPython` helper writes JSON config to a temp file, invokes `python3.12 scripts/<script>.py --action <verb> --config <path>`, captures JSON manifest from stdout. Python scripts invoked by the orchestrator: `foundry_agents.py` (agent CRUD), `foundry_tools.py` (connections + tool definitions), `foundry_knowledge.py` (vector stores + doc upload), `foundry_search_index.py` (Azure AI Search index lifecycle + doc upload with embeddings), `foundry_evals.py` (evaluations pipeline), `foundry_redteam.py` (AI Red Teaming). Standalone CLI scripts (not invoked by Deploy.ps1): `demo_security_triage.py` (Defender alerts → Triage agent), `fetch_defender_alerts.py` (Graph security alert pull — also importable), `attack_agents.py` (adversarial traffic catalog, opt-in via `-AdversarialTraffic`), `trend_redteam.py` (manifest-diff ASR regressions + HTML report). API versions are passed from PowerShell (single source of truth).
 - **Agent tools**: Each agent gets tools defined in `config.json` under `agents[].tools[]`. Tool definitions are built by `foundry_tools.py`, injecting runtime values (vector store IDs, connection IDs) from earlier deployment steps. Currently supports: code_interpreter, file_search, azure_ai_search, bing_grounding, openapi, azure_function, function, mcp, sharepoint_grounding, a2a, image_generation.
+- **Security-Triage demo**: `scripts/demo_security_triage.py` pulls recent Defender XDR alerts via Microsoft Graph (`SecurityAlert.Read.All` + `SecurityIncident.Read.All`), ranks top-N by severity, and pipes each one through the deployed Security-Triage Foundry agent using the thread/message/run REST pattern shared with `foundry_redteam.py` (`_build_agent_callback` at `scripts/foundry_redteam.py:106-144`). Writes `logs/security-triage-demo-<UTC>.json` with `{alert, run_status, duration_ms, assistant_response}` per alert. Reads the agent id from the latest `manifests/*.json`. Requires `az login` against the target sub.
+- **Red-team trend HTML**: `scripts/trend_redteam.py --html <path>` renders a standalone HTML report (per-agent ASR table, evaluator metrics, regression highlighting). Auto-invoked by `modules/Foundry.psm1` after Step 8 against the prior manifest; writes `logs/redteam-trend-<stamp>.html`. Non-fatal on error.
+- **Adversarial traffic switch**: `Deploy.ps1 -AdversarialTraffic` invokes `scripts/attack_agents.py` after agents deploy and writes `logs/attack_<stamp>.json`. Generates real alerts in Defender XDR / Purview / Foundry evaluators — opt-in only, lab tenants only.
 - **Post-deploy evaluations**: Run automatically as Step 7 in Deploy-Foundry. Includes prompt optimization, custom evaluator creation (compliance_adherence), batch eval with synthetic data (quality + safety + agent evaluators), and continuous evaluation enablement (10% sampling).
 - **AI Red Teaming**: Runs as Step 8 in Deploy-Foundry (after evaluations). Uses Microsoft's AI Red Teaming Agent (PyRIT-backed) to probe deployed agents for content safety risks, prompt injection, jailbreak, encoding bypasses, and more. Local mode sends adversarial prompts through transient Foundry threads (cleaned up after each probe). Cloud mode uses Foundry eval API with taxonomy-driven agentic risk testing. `azure-ai-evaluation[redteam]` is an optional dependency (separate `requirements-redteam.txt`). Cloud mode requires a supported region (East US 2, France Central, Sweden Central, Switzerland West, North Central US); falls back to local on unsupported regions.
 - **Logging**: All output goes through `Write-LabLog` (Level: Info/Warning/Error/Success) and `Write-LabStep` for visual sections. Transcripts auto-cleanup after 30 days.
 
-### Post-deploy manual steps
+### Post-deploy manual steps (v0.11.0+)
 
-A handful of things `Deploy.ps1` cannot automate (tenant admin approval,
-external resources, MCAPS policy gates). See
+Most post-deploy items are now automated. See
 [`docs/post-deploy-steps.md`](docs/post-deploy-steps.md) for the full
-checklist. Summary:
+checklist. Remaining manual items (all blocked by MCAPS or external
+resources):
 
 1. Approve Agent 365 digital-worker submissions at
-   <https://admin.cloud.microsoft/?#/agents/all/requested>
-2. Deploy Teams apps to users via M365 admin center → Integrated apps →
-   Deploy (per-user install via Graph is 403'd by MCAPS policy)
-3. Enable Defender for Cloud "Data security for AI interactions" toggle
-4. Provision SharePoint / Bing Search resources and wire their IDs into
-   `config.json` → `workloads.foundry.connections`
+   <https://admin.cloud.microsoft/?#/agents/all/requested> — no API available.
+2. Deploy Teams apps to users via M365 admin center → Integrated apps —
+   per-user install via Graph is 403'd by MCAPS policy.
+3. Populate SharePoint `siteUrl` in `config.json` → `workloads.foundry.connections.sharePoint` if SharePoint grounding is desired (tool skipped otherwise).
 
-Run through the checklist after every clean deploy.
+**Automated (no action needed):**
+- Defender for Cloud "Data security for AI interactions" — wired into `infra/defender-posture.bicep` as `Microsoft.Security/pricings@2024-01-01` (name `AI`, extensions `AIModelScanner` + `AIPromptEvidence` + `AIPromptSharingWithPurview`).
+- Bing Grounding — set `workloads.foundry.connections.bingSearch.provision: true` to auto-provision a `Microsoft.Bing/accounts` resource.
+- Agent-to-Agent (a2a) project connection — auto-created when `workloads.foundry.connections.a2a` is present in config.
+- Foundry guardrail-baseline Azure Policy initiative — `infra/foundry-guardrail-policies.bicep`.
+- Adversarial traffic fire — `Deploy.ps1 -AdversarialTraffic`.
 
 ### Known Constraints & Tenant Requirements
 
@@ -351,8 +366,9 @@ Single config at `config.json`. Required top-level: `labName`, `prefix`, `domain
 
 - Conditional Access policies deploy in **report-only mode** (not enforced)
 - MDCA session policies (CAAC) deploy in **report-only mode** via CA
-- Defender for Cloud posture enables Standard pricing tiers (non-destructive on teardown)
+- Defender for Cloud posture enables Standard pricing tiers for Storage, App Services, Key Vault, ARM, and **AI** (non-destructive on teardown). The AI plan enables prompt/response capture + Purview sharing — set `enableAIDefender: false` in `infra/defender-posture.bicep` to opt out.
 - All Deploy/Remove functions support `-WhatIf` via `$PSCmdlet.ShouldProcess()`
+- `-AdversarialTraffic` is **opt-in only** — generates real alerts, lab/demo tenants only.
 
 ## Conventions
 
@@ -373,3 +389,18 @@ GitHub Actions (`validate.yml`) runs six jobs:
 4. **python-lint** — `ruff check scripts/`
 5. **python-test** — `pytest scripts/tests/`
 6. **bicep-validate** — `az bicep build` on all templates in `infra/`
+
+## Pre-commit hook
+
+`.githooks/pre-commit` runs `ruff` on staged `scripts/**/*.py` and
+`PSScriptAnalyzer` (Warning level, same exclusions as CI) on staged
+`*.ps1` / `*.psm1` / `*.psd1`. Install with `./scripts/install-hooks.sh`.
+Only bypass with `git commit --no-verify` when the user explicitly asks.
+
+## Releases
+
+Every push to `main` gets a new GitHub release with a version tag
+(`v<major>.<minor>.<patch>`) and markdown bullet release notes. Use
+`gh release create vX.Y.Z --title "vX.Y.Z — <headline>" --notes "..."`
+with manual notes; never `--generate-notes`. Current version: **v0.11.0**
+(Security-Triage demo + a2a re-enable + redteam trend HTML).
