@@ -247,28 +247,41 @@ a convenience for tight rerun loops.
 
 ## 7. Fire adversarial traffic to light up detections
 
-**Status: AUTOMATED opt-in (v0.9.0+).** Pass `-AdversarialTraffic` to
-`Deploy.ps1` to fire the catalog automatically at the end of a deploy:
+**Status: AUTOMATED opt-in (v0.9.0+; v0.16+ adds the gateway harness).**
+Two paths:
 
 ```powershell
+# Path A: agent-thread harness (legacy) — fires through Foundry agents,
+# attaches user_security_context, can hang on poll for stuck calls.
 ./Deploy.ps1 -ConfigPath config.json -AdversarialTraffic
 ```
 
-Writes a full JSON report to `logs/attack_<timestamp>.json`. The sections
-below still apply for ad-hoc / scoped runs.
+```bash
+# Path B: gateway harness (recommended, v0.16+) — fires through APIM
+# AI Gateway directly. Captures full content_filter_result per call,
+# grades into 6 outcomes, supports --assert for CI gating, stamps
+# run_id into the user field for XDR correlation. See docs/smoke-testing.md.
+python3.12 scripts/attack_via_gateway.py --output logs/run.json
+python3.12 scripts/attack_via_gateway.py --output logs/run.json --assert --min-coverage 0.9
+python3.12 scripts/attack_via_gateway.py --category prompt_injection --wait-for-alerts 15
+```
+
+For the full smoke-test contract (expected_classifiers, grades,
+coverage matrix, run_id correlation, `--wait-for-alerts`), see
+[`docs/smoke-testing.md`](smoke-testing.md).
 
 **When.** After the Foundry workload is deployed and Defender / Purview
 are enabled (steps 3 + 5) and you want to *see* alerts surface in the
 Defender XDR incident queue, Prompt Shields logs, Purview DSPM for AI,
 and Foundry evaluators.
 
-**What it does.** `scripts/attack_agents.py` sends a curated catalog of
-hostile prompts — prompt injection, jailbreak, XPIA, PII harvest,
-credential fishing, harmful content, protected material, groundedness
-fabrication — to every agent in the most recent deployment manifest.
-Each call carries a `user_security_context` so the traffic is attributed
-to a named end user and application. Every prompt is tagged with the
-detection signal it is designed to trip.
+**What it does.** Both harnesses send a curated catalog of hostile
+prompts — prompt injection, jailbreak, XPIA, PII harvest, credential
+fishing, harmful content, protected material, groundedness
+fabrication — at every agent. The gateway harness (Path B) attributes
+traffic via the `user` field stamped with a unique `run_id`; the
+agent-thread harness (Path A) attaches `user_security_context`. Every
+prompt is tagged with the detection signal it is designed to trip.
 
 **Usage.**
 

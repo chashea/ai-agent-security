@@ -226,6 +226,34 @@ by default). The pipeline runs automatically at the end of `Deploy.ps1`.
 successfully elicit undesirable responses. Results are logged to the deployment
 manifest under `redTeaming.agentScans[].scorecard`.
 
+## Smoke testing
+
+`scripts/attack_via_gateway.py` (v0.16+) is the recommended adversarial
+harness. It fires the 29-attack catalog through the live APIM AI
+Gateway, captures the full `content_filter_result` per call, grades
+each call into one of six outcomes (`pass-blocked-by-filter`,
+`pass-refused-by-agent`, `FAIL-complied`, …), and emits a per-category
+coverage matrix.
+
+```bash
+# Full catalog
+python3.12 scripts/attack_via_gateway.py --output logs/run.json
+
+# Assert ≥90% jailbreak-classifier coverage; exit 1 on breach
+python3.12 scripts/attack_via_gateway.py --category prompt_injection \
+  --assert --min-coverage 0.9
+
+# Run + wait 15 min for Defender XDR alerts to materialize, correlate by run_id
+python3.12 scripts/attack_via_gateway.py --output logs/full.json \
+  --wait-for-alerts 15
+```
+
+Each run gets a `run_id` (`uuid4[:8]`) stamped into the chat-completions
+`user` field for XDR / Purview correlation. See
+[`docs/smoke-testing.md`](docs/smoke-testing.md) for the full
+contract — attack catalog, grading model, coverage matrix, `--assert`
+behavior, pre-push hook integration, and known gateway-TPM gotchas.
+
 ## Security-Triage demo
 
 `scripts/demo_security_triage.py` pulls recent Defender XDR alerts via
