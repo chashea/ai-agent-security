@@ -98,8 +98,8 @@ Return a short report, not a wall of JSON:
 
 ```
 verify-summary:
-  agents_expected: 4
-  agents_found: 4
+  agents_expected: 5
+  agents_found: 5
   drift_detected: yes | no
   issues:
     - AISec-IT-Support azure_ai_search: empty project_connection_id

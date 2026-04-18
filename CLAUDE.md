@@ -352,9 +352,9 @@ HTTP 403 and the index will not be populated. Symptom in the agent UX:
 
 **Embeddings throttle on small TPM quotas.** `text-embedding-3-small`
 defaults to a low TPM quota (~1K) on new Foundry accounts. Uploading
-~21 documents through the populator will spend 5-10 minutes on 429
-backoff. The retry budget (8 attempts × exponential backoff) is large
-enough to absorb this; if a deploy hangs longer than that on the
+the 12 demo documents through the populator can spend 5-10 minutes on
+429 backoff. The retry budget (8 attempts × exponential backoff) is
+large enough to absorb this; if a deploy hangs longer than that on the
 `AI Search Index` step, raise the deployment quota in the Foundry
 portal → Models + endpoints → text-embedding-3-small → Edit.
 

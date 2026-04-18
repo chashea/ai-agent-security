@@ -43,8 +43,9 @@ not fatal — but the populator will then fail with 403.
 ## Verification commands
 
 See `docs/post-deploy-steps.md#verification` for the facet curl and
-sample semantic-ranked query. Expect 21 docs total (3 per agent_scope
-× 7 agents).
+sample semantic-ranked query. Expect 12 docs total (3 per agent_scope
+× 4 agent_scopes: HR-Helpdesk, Finance-Analyst, IT-Support,
+Sales-Research).
 
 ## Tests
 

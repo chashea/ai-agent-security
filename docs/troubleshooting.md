@@ -463,7 +463,7 @@ the demo corpus tagged with an `agent_scope` filterable field.
 
 **Verify.** Use the facet curl in
 [`docs/post-deploy-steps.md#verification`](post-deploy-steps.md#verification).
-Expect a count of 21 documents (3 per agent_scope × 7 agents).
+Expect a count of 12 documents (3 per agent_scope × 4 agent_scopes: HR-Helpdesk, Finance-Analyst, IT-Support, Sales-Research).
 
 ## AI Search index population fails with HTTP 403 Forbidden
 
@@ -544,14 +544,15 @@ HTTP 400 (`API version not supported`) or 404.
 
 **What you should see populated.**
 
-- **Agents → `<agent>` → Tools → file_search** — 7 vector stores named
-  `AISec-<agent>-knowledge`.
-- **Knowledge → Indexes / Vector stores** — the same 7 stores
+- **Agents → `<agent>` → Tools → file_search** — 4 vector stores named
+  `AISec-<agent>-knowledge` (HR-Helpdesk, Finance-Analyst, IT-Support,
+  Sales-Research). Security-Triage declares no `file_search` tool.
+- **Knowledge → Indexes / Vector stores** — the same 4 stores
   surfaced as `ManagedAzureSearch` indexes.
 - **Connected resources → Azure AI Search** — one connection
   `AISec-ai-search`.
 - **Azure portal → AI Search → `aisec-search-eastus` → Indexes** —
-  one index `aisec-compliance-index` with 21 docs.
+  one index `aisec-compliance-index` with 12 docs.
 
 **Fix (optional).** If you want the Foundry IQ tab populated for a
 demo, follow the manual portal flow in

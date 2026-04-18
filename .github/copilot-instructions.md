@@ -14,7 +14,7 @@ constraint. Everything below exists to keep the deploy reproducible.
 
 The deploy stands up:
 
-- 7 Foundry agents (HR, Finance, IT, Sales, Kusto, Entra, Defender)
+- 5 Foundry agents (HR-Helpdesk, Finance-Analyst, IT-Support, Sales-Research, Security-Triage)
 - A shared Azure AI Search index (`aisec-compliance-index`, hybrid +
   semantic, `agent_scope` filter) populated from `scripts/demo_docs/`
 - Per-agent file_search vector stores
@@ -62,7 +62,8 @@ FoundryInfra.psm1             foundry_tools.py                   foundry-eval-in
 2. Project connections via ARM control plane
 3. Vector stores (`foundry_knowledge.py upload`)
 3b. **AI Search index** (`foundry_search_index.py populate`) — creates
-    `aisec-compliance-index`, uploads ~21 docs tagged with `agent_scope`
+    `aisec-compliance-index`, uploads 12 docs tagged with `agent_scope`
+    (4 business-function scopes × 3 docs each)
 4. Tool definitions (`foundry_tools.py build-tools`)
 5. Agents (`foundry_agents.py deploy` — DELETE-then-POST, no PATCH)
 6. Teams packages + Bot Services + Teams catalog publish
