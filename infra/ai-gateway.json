@@ -1,0 +1,300 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "metadata": {
+    "_generator": {
+      "name": "bicep",
+      "version": "0.39.26.7824",
+      "templateHash": "12439799475468379051"
+    }
+  },
+  "parameters": {
+    "apimName": {
+      "type": "string",
+      "metadata": {
+        "description": "Name of the APIM instance (3-50 chars, lowercase alphanumeric + hyphens)."
+      }
+    },
+    "location": {
+      "type": "string",
+      "defaultValue": "[resourceGroup().location]",
+      "metadata": {
+        "description": "Azure region for the APIM instance."
+      }
+    },
+    "skuName": {
+      "type": "string",
+      "defaultValue": "BasicV2",
+      "allowedValues": [
+        "BasicV2",
+        "StandardV2",
+        "PremiumV2"
+      ],
+      "metadata": {
+        "description": "APIM SKU. BasicV2 is the portal default for AI Gateway (dev/test, with SLA). StandardV2 and PremiumV2 are production tiers."
+      }
+    },
+    "skuCapacity": {
+      "type": "int",
+      "defaultValue": 1,
+      "minValue": 1,
+      "maxValue": 10,
+      "metadata": {
+        "description": "APIM capacity units (1 for BasicV2/StandardV2, 1-10 for PremiumV2)."
+      }
+    },
+    "publisherEmail": {
+      "type": "string",
+      "metadata": {
+        "description": "Publisher email attached to the APIM instance (shown in developer portal)."
+      }
+    },
+    "publisherName": {
+      "type": "string",
+      "metadata": {
+        "description": "Publisher display name attached to the APIM instance."
+      }
+    },
+    "foundryAccountName": {
+      "type": "string",
+      "metadata": {
+        "description": "Name of the existing Foundry (Cognitive Services) account to front."
+      }
+    },
+    "appInsightsResourceId": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Optional: existing Application Insights resource ID for token-metric emission. Leave blank to skip metric emission."
+      }
+    },
+    "tokensPerMinute": {
+      "type": "int",
+      "defaultValue": 1000,
+      "minValue": 10,
+      "metadata": {
+        "description": "TPM (tokens-per-minute) rate limit per APIM subscription key."
+      }
+    },
+    "monthlyTokenQuota": {
+      "type": "int",
+      "defaultValue": 0,
+      "minValue": 0,
+      "metadata": {
+        "description": "Monthly token quota per APIM subscription key (0 disables the quota, use rate limit only)."
+      }
+    },
+    "openaiApiName": {
+      "type": "string",
+      "defaultValue": "aoai",
+      "metadata": {
+        "description": "Name of the OpenAI-compatible API inside APIM (appears in developer portal)."
+      }
+    },
+    "openaiApiPath": {
+      "type": "string",
+      "defaultValue": "openai",
+      "metadata": {
+        "description": "Path prefix the API is served under (e.g. <apim>.azure-api.net/openai)."
+      }
+    },
+    "openaiApiVersion": {
+      "type": "string",
+      "defaultValue": "2024-10-21",
+      "metadata": {
+        "description": "Azure OpenAI API version surfaced through the gateway (matches the api-version query-string value)."
+      }
+    }
+  },
+  "variables": {
+    "cognitiveServicesOpenAIUserRoleId": "5e0bd9bd-7b93-4f28-af87-19fc36ad61bd",
+    "policyXml": "<policies>\n  <inbound>\n    <base />\n    <authentication-managed-identity resource=\"https://cognitiveservices.azure.com\" />\n    <set-backend-service backend-id=\"foundry-aoai\" />\n    <llm-token-limit\n      counter-key=\"@(context.Subscription.Id)\"\n      tokens-per-minute=\"{0}\"\n      estimate-prompt-tokens=\"false\"\n      {1}\n      remaining-tokens-variable-name=\"remainingTokens\" />\n    {2}\n  </inbound>\n  <backend>\n    <base />\n  </backend>\n  <outbound>\n    <base />\n  </outbound>\n  <on-error>\n    <base />\n  </on-error>\n</policies>\n",
+    "quotaAttributes": "[if(greater(parameters('monthlyTokenQuota'), 0), format('token-quota=\"{0}\" token-quota-period=\"Monthly\" remaining-quota-tokens-variable-name=\"remainingQuotaTokens\"', parameters('monthlyTokenQuota')), '')]",
+    "emitMetricPolicy": "[if(empty(parameters('appInsightsResourceId')), '', '<llm-emit-token-metric namespace=\"aisec-aigateway\"><dimension name=\"Subscription ID\" /><dimension name=\"Deployment\" value=\"@(context.Request.MatchedParameters[\\\"deployment-id\\\"])\" /></llm-emit-token-metric>')]"
+  },
+  "resources": [
+    {
+      "type": "Microsoft.ApiManagement/service",
+      "apiVersion": "2024-06-01-preview",
+      "name": "[parameters('apimName')]",
+      "location": "[parameters('location')]",
+      "sku": {
+        "name": "[parameters('skuName')]",
+        "capacity": "[parameters('skuCapacity')]"
+      },
+      "identity": {
+        "type": "SystemAssigned"
+      },
+      "properties": {
+        "publisherEmail": "[parameters('publisherEmail')]",
+        "publisherName": "[parameters('publisherName')]",
+        "virtualNetworkType": "None",
+        "publicNetworkAccess": "Enabled"
+      }
+    },
+    {
+      "type": "Microsoft.Authorization/roleAssignments",
+      "apiVersion": "2022-04-01",
+      "scope": "[format('Microsoft.CognitiveServices/accounts/{0}', parameters('foundryAccountName'))]",
+      "name": "[guid(resourceId('Microsoft.CognitiveServices/accounts', parameters('foundryAccountName')), resourceId('Microsoft.ApiManagement/service', parameters('apimName')), variables('cognitiveServicesOpenAIUserRoleId'))]",
+      "properties": {
+        "principalId": "[reference(resourceId('Microsoft.ApiManagement/service', parameters('apimName')), '2024-06-01-preview', 'full').identity.principalId]",
+        "principalType": "ServicePrincipal",
+        "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', variables('cognitiveServicesOpenAIUserRoleId'))]"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.ApiManagement/service', parameters('apimName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.ApiManagement/service/backends",
+      "apiVersion": "2024-06-01-preview",
+      "name": "[format('{0}/{1}', parameters('apimName'), 'foundry-aoai')]",
+      "properties": {
+        "protocol": "http",
+        "url": "[format('{0}openai', reference(resourceId('Microsoft.CognitiveServices/accounts', parameters('foundryAccountName')), '2025-06-01').endpoint)]",
+        "description": "[format('Foundry AOAI endpoint ({0})', parameters('foundryAccountName'))]"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.ApiManagement/service', parameters('apimName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.ApiManagement/service/apis",
+      "apiVersion": "2024-06-01-preview",
+      "name": "[format('{0}/{1}', parameters('apimName'), parameters('openaiApiName'))]",
+      "properties": {
+        "displayName": "Azure OpenAI (via AI Gateway)",
+        "description": "Foundry AOAI chat completions + embeddings surfaced through APIM with llm-token-limit + llm-emit-token-metric policies.",
+        "path": "[parameters('openaiApiPath')]",
+        "protocols": [
+          "https"
+        ],
+        "serviceUrl": "[format('{0}openai', reference(resourceId('Microsoft.CognitiveServices/accounts', parameters('foundryAccountName')), '2025-06-01').endpoint)]",
+        "subscriptionRequired": true,
+        "apiType": "http",
+        "format": "openapi+json",
+        "value": "[string(createObject('openapi', '3.0.1', 'info', createObject('title', 'Azure OpenAI', 'version', parameters('openaiApiVersion')), 'servers', createArray(createObject('url', format('{0}openai', reference(resourceId('Microsoft.CognitiveServices/accounts', parameters('foundryAccountName')), '2025-06-01').endpoint))), 'paths', createObject('/deployments/{deployment-id}/chat/completions', createObject('post', createObject('operationId', 'chatCompletions', 'summary', 'Creates a chat completion for the given model deployment.', 'parameters', createArray(createObject('name', 'deployment-id', 'in', 'path', 'required', true(), 'schema', createObject('type', 'string')), createObject('name', 'api-version', 'in', 'query', 'required', true(), 'schema', createObject('type', 'string'))), 'requestBody', createObject('required', true(), 'content', createObject('application/json', createObject('schema', createObject('type', 'object')))), 'responses', createObject('200', createObject('description', 'Chat completion response')))), '/deployments/{deployment-id}/embeddings', createObject('post', createObject('operationId', 'embeddings', 'summary', 'Creates an embedding vector for the given input.', 'parameters', createArray(createObject('name', 'deployment-id', 'in', 'path', 'required', true(), 'schema', createObject('type', 'string')), createObject('name', 'api-version', 'in', 'query', 'required', true(), 'schema', createObject('type', 'string'))), 'requestBody', createObject('required', true(), 'content', createObject('application/json', createObject('schema', createObject('type', 'object')))), 'responses', createObject('200', createObject('description', 'Embeddings response')))))))]"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.ApiManagement/service', parameters('apimName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.ApiManagement/service/apis/policies",
+      "apiVersion": "2024-06-01-preview",
+      "name": "[format('{0}/{1}/{2}', parameters('apimName'), parameters('openaiApiName'), 'policy')]",
+      "properties": {
+        "format": "rawxml",
+        "value": "[format(variables('policyXml'), string(parameters('tokensPerMinute')), variables('quotaAttributes'), variables('emitMetricPolicy'))]"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.ApiManagement/service/backends', parameters('apimName'), 'foundry-aoai')]",
+        "[extensionResourceId(resourceId('Microsoft.CognitiveServices/accounts', parameters('foundryAccountName')), 'Microsoft.Authorization/roleAssignments', guid(resourceId('Microsoft.CognitiveServices/accounts', parameters('foundryAccountName')), resourceId('Microsoft.ApiManagement/service', parameters('apimName')), variables('cognitiveServicesOpenAIUserRoleId')))]",
+        "[resourceId('Microsoft.ApiManagement/service/apis', parameters('apimName'), parameters('openaiApiName'))]"
+      ]
+    },
+    {
+      "condition": "[not(empty(parameters('appInsightsResourceId')))]",
+      "type": "Microsoft.ApiManagement/service/loggers",
+      "apiVersion": "2024-06-01-preview",
+      "name": "[format('{0}/{1}', parameters('apimName'), 'appinsights-logger')]",
+      "properties": {
+        "loggerType": "applicationInsights",
+        "description": "AI Gateway metrics + token counters",
+        "credentials": {
+          "instrumentationKey": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, split(parameters('appInsightsResourceId'), '/')[4]), 'Microsoft.Insights/components', last(split(parameters('appInsightsResourceId'), '/'))), '2020-02-02').InstrumentationKey]"
+        },
+        "resourceId": "[parameters('appInsightsResourceId')]"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.ApiManagement/service', parameters('apimName'))]"
+      ]
+    },
+    {
+      "condition": "[not(empty(parameters('appInsightsResourceId')))]",
+      "type": "Microsoft.ApiManagement/service/apis/diagnostics",
+      "apiVersion": "2024-06-01-preview",
+      "name": "[format('{0}/{1}/{2}', parameters('apimName'), parameters('openaiApiName'), 'applicationinsights')]",
+      "properties": {
+        "loggerId": "[resourceId('Microsoft.ApiManagement/service/loggers', parameters('apimName'), 'appinsights-logger')]",
+        "verbosity": "information",
+        "sampling": {
+          "samplingType": "fixed",
+          "percentage": 100
+        },
+        "frontend": {
+          "request": {
+            "headers": [
+              "Content-Type"
+            ]
+          },
+          "response": {
+            "headers": [
+              "Content-Type"
+            ]
+          }
+        },
+        "backend": {
+          "request": {
+            "headers": [
+              "Content-Type"
+            ]
+          },
+          "response": {
+            "headers": [
+              "Content-Type"
+            ]
+          }
+        },
+        "httpCorrelationProtocol": "W3C",
+        "alwaysLog": "allErrors"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.ApiManagement/service/loggers', parameters('apimName'), 'appinsights-logger')]",
+        "[resourceId('Microsoft.ApiManagement/service/apis', parameters('apimName'), parameters('openaiApiName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.ApiManagement/service/subscriptions",
+      "apiVersion": "2024-06-01-preview",
+      "name": "[format('{0}/{1}', parameters('apimName'), 'aisec-demo')]",
+      "properties": {
+        "displayName": "AISec Demo Subscription",
+        "scope": "[resourceId('Microsoft.ApiManagement/service/apis', parameters('apimName'), parameters('openaiApiName'))]",
+        "state": "active",
+        "allowTracing": false
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.ApiManagement/service', parameters('apimName'))]",
+        "[resourceId('Microsoft.ApiManagement/service/apis', parameters('apimName'), parameters('openaiApiName'))]"
+      ]
+    }
+  ],
+  "outputs": {
+    "apimName": {
+      "type": "string",
+      "value": "[parameters('apimName')]"
+    },
+    "apimResourceId": {
+      "type": "string",
+      "value": "[resourceId('Microsoft.ApiManagement/service', parameters('apimName'))]"
+    },
+    "apimPrincipalId": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.ApiManagement/service', parameters('apimName')), '2024-06-01-preview', 'full').identity.principalId]"
+    },
+    "gatewayUrl": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.ApiManagement/service', parameters('apimName')), '2024-06-01-preview').gatewayUrl]"
+    },
+    "openaiPath": {
+      "type": "string",
+      "value": "[parameters('openaiApiPath')]"
+    },
+    "starterSubscriptionId": {
+      "type": "string",
+      "value": "aisec-demo"
+    }
+  }
+}

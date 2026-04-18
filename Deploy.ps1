@@ -320,9 +320,16 @@ try {
         else {
             Write-LabLog -Message 'foundry workload is disabled in config, skipping.' -Level Info
         }
+
+        if ($Config.workloads.PSObject.Properties['aiGateway'] -and $Config.workloads.aiGateway.enabled) {
+            Invoke-Workload -Name 'aiGateway' -Step 'AIGateway' -Description 'Provisioning APIM-based AI Gateway in front of Foundry' -Action {
+                Deploy-AIGateway -Config $Config -FoundryManifest $manifest['foundry'] -WhatIf:$WhatIfPreference
+            }
+        }
+        else { Write-LabLog -Message 'aiGateway workload is disabled in config, skipping.' -Level Info }
     }
     else {
-        Write-LabLog -Message 'Foundry and AgentIdentity skipped (-SkipFoundry).' -Level Info
+        Write-LabLog -Message 'Foundry, AgentIdentity, and AIGateway skipped (-SkipFoundry).' -Level Info
     }
 
     # Security workloads — skipped when -FoundryOnly is set

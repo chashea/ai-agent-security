@@ -4,6 +4,20 @@
   "domain": "MngEnvMCAP648165.onmicrosoft.com",
   "cloud": "commercial",
   "workloads": {
+    "aiGateway": {
+      "enabled": true,
+      "name": "aisec-aigw",
+      "sku": "BasicV2",
+      "capacity": 1,
+      "publisherEmail": "charlesjshea15@gmail.com",
+      "publisherName": "AISec AI Gateway",
+      "tokensPerMinute": 1000,
+      "monthlyTokenQuota": 0,
+      "openaiApiName": "aoai",
+      "openaiApiPath": "openai",
+      "openaiApiVersion": "2024-10-21",
+      "notes": "APIM-based AI Gateway in front of the Foundry AOAI endpoint. BasicV2 SKU matches the Foundry portal default (dev/test, with SLA). Provisioning takes 15-45 minutes the first time. Set enabled=false to skip. Runs AFTER Foundry so the Bicep can reference the live Foundry account. See docs/ai-gateway.md."
+    },
     "foundry": {
       "enabled": true,
       "subscriptionId": "9d02bc65-7c0d-4c6a-b824-da0000cb7c7d",

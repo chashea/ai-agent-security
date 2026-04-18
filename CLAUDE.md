@@ -167,10 +167,11 @@ Constraints section.
 
 1. Foundry — agents + Defender for Cloud posture
 2. AgentIdentity — managed identity RBAC (auto-derived from tools)
-3. TestUsers — groups used for label scoping
-4. SensitivityLabels (+ AI Search label-enforcement roles on the index MI)
-5. ConditionalAccess — MFA + risky sign-in block (report-only)
-6. MDCA — session monitoring + activity alerts + app governance
+3. AIGateway — APIM v2 in front of Foundry AOAI with TPM + quota + metrics
+4. TestUsers — groups used for label scoping
+5. SensitivityLabels (+ AI Search label-enforcement roles on the index MI)
+6. ConditionalAccess — MFA + risky sign-in block (report-only)
+7. MDCA — session monitoring + activity alerts + app governance
 
 Removal is the exact reverse.
 

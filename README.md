@@ -160,6 +160,7 @@ Each workload under `workloads` has an `enabled` boolean. Set to `false` to skip
 |---|---|
 | `foundry` | Azure AI Foundry account, project, model deployment, and agent definitions |
 | `agentIdentity` | Managed identity and auto-derived RBAC assignments for agent principals |
+| `aiGateway` | APIM-based AI Gateway in front of the Foundry AOAI endpoint with TPM limits, monthly quotas, and App Insights token metrics. See [`docs/ai-gateway.md`](docs/ai-gateway.md). |
 | `testUsers` | User and group provisioning for scoped policy assignment |
 | `sensitivityLabels` | Sensitivity label hierarchy with AI-tier sublabels, auto-label policies, and AI Search MI role grants |
 | `conditionalAccess` | Conditional Access policies (MFA, risky sign-in block) for agent principals — report-only |

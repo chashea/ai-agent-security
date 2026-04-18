@@ -249,6 +249,14 @@ try {
 
     # Foundry removed last — reverse of deploy order (Foundry deploys first)
     if (-not $SkipFoundry) {
+        if ($Config.workloads.PSObject.Properties['aiGateway'] -and $Config.workloads.aiGateway.enabled) {
+            Write-LabStep -StepName 'AIGateway' -Description 'Removing APIM-based AI Gateway'
+            Invoke-RemoveWorkload -Name 'AIGateway' -ScriptBlock {
+                Remove-AIGateway -Config $Config -Manifest (Get-WorkloadManifest -WorkloadName 'aiGateway') -WhatIf:$WhatIfPreference
+                Write-LabLog -Message 'AIGateway removal initiated.' -Level Success
+            }
+        }
+
         if ($foundryConfigEnabled) {
             Write-LabStep -StepName 'AgentIdentity' -Description 'Removing agent managed identity and RBAC'
             Invoke-RemoveWorkload -Name 'AgentIdentity' -ScriptBlock {
@@ -267,7 +275,7 @@ try {
         }
     }
     else {
-        Write-LabLog -Message 'Foundry and AgentIdentity removal skipped (-SkipFoundry).' -Level Info
+        Write-LabLog -Message 'Foundry, AgentIdentity, and AIGateway removal skipped (-SkipFoundry).' -Level Info
     }
 
     # Summary
