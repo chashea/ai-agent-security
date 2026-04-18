@@ -303,6 +303,14 @@ depending on pytest retries). Skip individual jobs with env vars
 `SKIP_SMOKE=1`) when iterating; bypass entirely with
 `git push --no-verify` only when explicitly instructed.
 
+**Opt-in adversarial smoke** — set `RUN_ADVERSARIAL_SMOKE=1` to fire
+`scripts/attack_via_gateway.py --category prompt_injection` (5 attacks
+× 5 agents = 25 calls, ~45 s) through the live AI Gateway before push,
+asserting **≥90% jailbreak-classifier coverage**. Catches RAI tuning
+regressions and broken gateway policy XML. Requires an active
+`az login` + a manifest with `aiGateway.starterSubscriptionKey`;
+auto-skips with a clear message if either is missing.
+
 ### Subagents / skills
 
 Five specialized agents available to both Claude Code

@@ -403,6 +403,13 @@ GitHub Actions (`validate.yml`) runs six jobs:
   (`SKIP_PYTEST=1`, `SKIP_PESTER=1`, `SKIP_BICEP=1`, `SKIP_PSSA=1`,
   `SKIP_SMOKE=1`). Bypass entirely with `git push --no-verify` only
   when the user explicitly asks.
+  - **Opt-in adversarial smoke** (`RUN_ADVERSARIAL_SMOKE=1`): fires
+    `attack_via_gateway.py --category prompt_injection` (5 attacks ×
+    5 agents = 25 calls, ~45s) through the live AI Gateway and
+    asserts ≥90% jailbreak classifier coverage. Catches RAI tuning
+    regressions and gateway policy XML breakage. Requires `az login`
+    + a manifest with `aiGateway.starterSubscriptionKey`. Auto-skips
+    if any prerequisite is missing.
 
 Only use `--no-verify` on either hook when the user explicitly
 authorizes it — hooks are load-bearing (catch real CI failures locally).
