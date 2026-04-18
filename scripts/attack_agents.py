@@ -293,7 +293,9 @@ def run_attacks(
                     session=session,
                 )
                 outcome = classify_response(status, body)
-                snippet = (body or "")[:200]
+                # Keep FULL body so content-filter verdicts on blocked calls
+                # survive in the report. Console log still truncates at 200.
+                snippet = body or ""
             results.append(
                 AttackResult(
                     agent=short,
