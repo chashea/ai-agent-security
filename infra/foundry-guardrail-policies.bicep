@@ -358,13 +358,196 @@ resource p8 'Microsoft.Authorization/policyDefinitions@2023-04-01' = {
   }
 }
 
+// ── 9. Require PII (personally identifiable info) filter on Completion ──────
+// Azure AI Content Safety PII detector runs on model completions and can
+// annotate / filter / redact SSN, email, phone, credit-card, passport, etc.
+// Policy requires a blocking "pii" filter on the Completion source.
+
+resource p9 'Microsoft.Authorization/policyDefinitions@2023-04-01' = {
+  name: '${namePrefix}-require-pii-filter'
+  properties: {
+    displayName: '${displayPrefix}: PII filter must be blocking on Completion'
+    description: 'Denies or audits RAI policies missing a blocking "pii" content filter on the Completion source. Catches SSN / credit card / email / phone / passport patterns emitted by the model even when core harm filters miss them. Complements the custom blocklist policy: blocklist catches known patterns, PII detector catches novel ones.'
+    mode: 'All'
+    metadata: metadataCommon
+    parameters: {
+      effect: {
+        type: 'String'
+        allowedValues: ['Audit', 'Deny', 'Disabled']
+        defaultValue: 'Audit'
+        metadata: { displayName: 'Effect' }
+      }
+    }
+    policyRule: {
+      if: {
+        allOf: [
+          { field: 'type', equals: 'Microsoft.CognitiveServices/accounts/raiPolicies' }
+          {
+            count: {
+              field: 'Microsoft.CognitiveServices/accounts/raiPolicies/contentFilters[*]'
+              where: {
+                allOf: [
+                  { field: 'Microsoft.CognitiveServices/accounts/raiPolicies/contentFilters[*].name', equals: 'pii' }
+                  { field: 'Microsoft.CognitiveServices/accounts/raiPolicies/contentFilters[*].source', equals: 'Completion' }
+                  { field: 'Microsoft.CognitiveServices/accounts/raiPolicies/contentFilters[*].enabled', equals: true }
+                  { field: 'Microsoft.CognitiveServices/accounts/raiPolicies/contentFilters[*].blocking', equals: true }
+                ]
+              }
+            }
+            less: 1
+          }
+        ]
+      }
+      then: { effect: '[parameters(\'effect\')]' }
+    }
+  }
+}
+
+// ── 10. Require groundedness filter on Completion ───────────────────────────
+// Groundedness detection flags completions that aren't supported by the
+// retrieval-augmented context (RAG grounding data). Critical for agents
+// with file_search / azure_ai_search / bing_grounding tools where a
+// hallucinated answer would bypass the knowledge base entirely.
+
+resource p10 'Microsoft.Authorization/policyDefinitions@2023-04-01' = {
+  name: '${namePrefix}-require-groundedness-filter'
+  properties: {
+    displayName: '${displayPrefix}: Groundedness filter must be enabled on Completion'
+    description: 'Denies or audits RAI policies missing a "groundedness" filter on the Completion source. Groundedness detection catches fabricated / ungrounded responses in RAG pipelines. Default config emits annotations; flip blocking=true to hard-fail ungrounded completions instead of logging them.'
+    mode: 'All'
+    metadata: metadataCommon
+    parameters: {
+      effect: {
+        type: 'String'
+        allowedValues: ['Audit', 'Deny', 'Disabled']
+        defaultValue: 'Audit'
+        metadata: { displayName: 'Effect' }
+      }
+    }
+    policyRule: {
+      if: {
+        allOf: [
+          { field: 'type', equals: 'Microsoft.CognitiveServices/accounts/raiPolicies' }
+          {
+            count: {
+              field: 'Microsoft.CognitiveServices/accounts/raiPolicies/contentFilters[*]'
+              where: {
+                allOf: [
+                  { field: 'Microsoft.CognitiveServices/accounts/raiPolicies/contentFilters[*].name', equals: 'groundedness' }
+                  { field: 'Microsoft.CognitiveServices/accounts/raiPolicies/contentFilters[*].source', equals: 'Completion' }
+                  { field: 'Microsoft.CognitiveServices/accounts/raiPolicies/contentFilters[*].enabled', equals: true }
+                ]
+              }
+            }
+            less: 1
+          }
+        ]
+      }
+      then: { effect: '[parameters(\'effect\')]' }
+    }
+  }
+}
+
+// ── 11. Require tool-call intervention filters (agent deployments) ──────────
+// Foundry agents have 4 intervention points per
+// learn.microsoft.com/azure/foundry/guardrails/guardrails-overview:
+//   User input (Prompt), Tool call (PreToolCall), Tool response
+//   (PostToolCall), Output (Completion).
+// This policy requires at least one filter on PreToolCall OR PostToolCall
+// so agentic deployments aren't blind to tool-boundary risks (e.g. an
+// openapi tool invoked with a payload that exfiltrates user data, or a
+// malicious doc returned by a file_search tool response).
+
+resource p11 'Microsoft.Authorization/policyDefinitions@2023-04-01' = {
+  name: '${namePrefix}-require-toolcall-filters'
+  properties: {
+    displayName: '${displayPrefix}: Agentic RAI policies must filter tool-call / tool-response'
+    description: 'Denies or audits RAI policies that have no content filter on the PreToolCall or PostToolCall intervention points. Foundry agent-service deployments should filter the action the agent proposes to send to a tool AND the content returned from a tool, not just the user prompt and final output. Preview intervention points per Foundry guardrail docs.'
+    mode: 'All'
+    metadata: metadataCommon
+    parameters: {
+      effect: {
+        type: 'String'
+        allowedValues: ['Audit', 'Deny', 'Disabled']
+        defaultValue: 'Audit'
+        metadata: { displayName: 'Effect' }
+      }
+    }
+    policyRule: {
+      if: {
+        allOf: [
+          { field: 'type', equals: 'Microsoft.CognitiveServices/accounts/raiPolicies' }
+          {
+            count: {
+              field: 'Microsoft.CognitiveServices/accounts/raiPolicies/contentFilters[*]'
+              where: {
+                allOf: [
+                  { field: 'Microsoft.CognitiveServices/accounts/raiPolicies/contentFilters[*].source', in: ['PreToolCall', 'PostToolCall'] }
+                  { field: 'Microsoft.CognitiveServices/accounts/raiPolicies/contentFilters[*].enabled', equals: true }
+                ]
+              }
+            }
+            less: 1
+          }
+        ]
+      }
+      then: { effect: '[parameters(\'effect\')]' }
+    }
+  }
+}
+
+// ── 12. Deny audit-mode creep (any sub-filter enabled but not blocking) ─────
+// Config-drift detector: if ANY individual content filter has enabled=true
+// AND blocking=false (annotate-only), the RAI policy as a whole is flagged.
+// Complements p3 (which enforces policy-level Blocking mode) — this catches
+// the subtler case where someone flips one filter to annotate-only while
+// leaving the policy mode itself in Blocking.
+
+resource p12 'Microsoft.Authorization/policyDefinitions@2023-04-01' = {
+  name: '${namePrefix}-deny-audit-mode-subfilter'
+  properties: {
+    displayName: '${displayPrefix}: No RAI sub-filter may be annotate-only (blocking=false)'
+    description: 'Denies or audits RAI policies where any individual content filter has enabled=true and blocking=false. Annotate-only ("audit") filters log detections but let traffic through. This policy catches config drift — someone weakening a single filter while leaving the policy in Blocking mode. Excludes filters where enabled=false (intentionally off is fine).'
+    mode: 'All'
+    metadata: metadataCommon
+    parameters: {
+      effect: {
+        type: 'String'
+        allowedValues: ['Audit', 'Deny', 'Disabled']
+        defaultValue: 'Audit'
+        metadata: { displayName: 'Effect' }
+      }
+    }
+    policyRule: {
+      if: {
+        allOf: [
+          { field: 'type', equals: 'Microsoft.CognitiveServices/accounts/raiPolicies' }
+          {
+            count: {
+              field: 'Microsoft.CognitiveServices/accounts/raiPolicies/contentFilters[*]'
+              where: {
+                allOf: [
+                  { field: 'Microsoft.CognitiveServices/accounts/raiPolicies/contentFilters[*].enabled', equals: true }
+                  { field: 'Microsoft.CognitiveServices/accounts/raiPolicies/contentFilters[*].blocking', equals: false }
+                ]
+              }
+            }
+            greater: 0
+          }
+        ]
+      }
+      then: { effect: '[parameters(\'effect\')]' }
+    }
+  }
+}
+
 // ── Initiative (policySet) ──────────────────────────────────────────────────
 
 resource initiative 'Microsoft.Authorization/policySetDefinitions@2023-04-01' = {
   name: '${namePrefix}-foundry-guardrails'
   properties: {
-    displayName: '${displayPrefix}: Baseline (8 controls)'
-    description: 'Baseline guardrail controls for Azure AI Foundry / Azure OpenAI model deployments, aligned with the Microsoft Foundry Control Plane guardrail policy wizard: RAI policy present, DefaultV2 base, Blocking mode, Prompt Shields (jailbreak + indirect attack), core Content Safety filters at severity Low, protected-material filters, and at least one custom blocklist.'
+    displayName: '${displayPrefix}: Baseline (12 controls)'
+    description: 'Baseline guardrail controls for Azure AI Foundry / Azure OpenAI model deployments, aligned with the Microsoft Foundry Control Plane guardrail policy wizard: RAI policy present, DefaultV2 base, Blocking mode, Prompt Shields (jailbreak + indirect attack), core Content Safety filters at severity Low, protected-material filters, custom blocklist, PII filter, groundedness filter, tool-call intervention filters, and audit-creep detector.'
     metadata: metadataCommon
     policyType: 'Custom'
     parameters: {
@@ -416,6 +599,26 @@ resource initiative 'Microsoft.Authorization/policySetDefinitions@2023-04-01' = 
         policyDefinitionId: p8.id
         parameters: { effect: { value: '[parameters(\'defaultEffect\')]' } }
       }
+      {
+        policyDefinitionReferenceId: 'requirePiiFilter'
+        policyDefinitionId: p9.id
+        parameters: { effect: { value: '[parameters(\'defaultEffect\')]' } }
+      }
+      {
+        policyDefinitionReferenceId: 'requireGroundednessFilter'
+        policyDefinitionId: p10.id
+        parameters: { effect: { value: '[parameters(\'defaultEffect\')]' } }
+      }
+      {
+        policyDefinitionReferenceId: 'requireToolCallFilters'
+        policyDefinitionId: p11.id
+        parameters: { effect: { value: '[parameters(\'defaultEffect\')]' } }
+      }
+      {
+        policyDefinitionReferenceId: 'denyAuditModeSubfilter'
+        policyDefinitionId: p12.id
+        parameters: { effect: { value: '[parameters(\'defaultEffect\')]' } }
+      }
     ]
   }
 }
@@ -448,4 +651,8 @@ output policyDefinitionIds array = [
   p6.id
   p7.id
   p8.id
+  p9.id
+  p10.id
+  p11.id
+  p12.id
 ]

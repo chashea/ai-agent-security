@@ -111,7 +111,7 @@ skips the RAI policy or weakens a filter. Mirrors the portal flow at
 [Create a guardrail policy](https://learn.microsoft.com/en-us/azure/foundry/control-plane/quickstart-create-guardrail-policy),
 but as code.
 
-**What it does.** `infra/foundry-guardrail-policies.bicep` creates 8
+**What it does.** `infra/foundry-guardrail-policies.bicep` creates 12
 custom policy definitions + 1 initiative + 1 subscription-scope
 assignment. The controls:
 
@@ -125,6 +125,10 @@ assignment. The controls:
 | 6 | `require-harmful-content-low-threshold` | `accounts/raiPolicies` | hate/sexual/violence/selfharm blocking at severity Low on Prompt + Completion |
 | 7 | `require-protected-material-filters` | `accounts/raiPolicies` | Blocking `protected_material_text` + `protected_material_code` on Completion |
 | 8 | `require-custom-blocklist` | `accounts/raiPolicies` | At least one `customBlocklists` entry with `blocking=true` |
+| 9 | `require-pii-filter` *(v0.17)* | `accounts/raiPolicies` | Blocking `pii` filter on Completion — catches SSN/CC/email/phone/passport emitted by the model |
+| 10 | `require-groundedness-filter` *(v0.17)* | `accounts/raiPolicies` | `groundedness` filter on Completion — flags fabricated / ungrounded responses in RAG pipelines |
+| 11 | `require-toolcall-filters` *(v0.17)* | `accounts/raiPolicies` | At least one filter on `PreToolCall` or `PostToolCall` intervention point — guards agentic tool-boundary risks |
+| 12 | `deny-audit-mode-subfilter` *(v0.17)* | `accounts/raiPolicies` | No individual content filter may have `enabled=true` + `blocking=false` — config-drift detector |
 
 **Deploy (Audit mode — safe to start here):**
 ```bash
