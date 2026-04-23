@@ -1,0 +1,303 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2018-05-01/subscriptionDeploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "metadata": {
+    "_generator": {
+      "name": "bicep",
+      "version": "0.39.26.7824",
+      "templateHash": "10786048271173073018"
+    }
+  },
+  "parameters": {
+    "namePrefix": {
+      "type": "string",
+      "defaultValue": "aisec-guardrail",
+      "metadata": {
+        "description": "Optional name prefix for the generated assignments. Foundry displays `<prefix>-<risk>` unless overridden."
+      }
+    },
+    "guardrailInitiativeId": {
+      "type": "string",
+      "defaultValue": "/providers/Microsoft.Authorization/policySetDefinitions/5207647b-3e83-4e28-b836-c382cb5e2a2e",
+      "metadata": {
+        "description": "Policy set (initiative) ID to assign per risk. Defaults to the built-in preview guardrail."
+      }
+    },
+    "definitionVersion": {
+      "type": "string",
+      "defaultValue": "1.*.*-PREVIEW",
+      "metadata": {
+        "description": "Policy definition version pin. Matches the value the Foundry portal writes."
+      }
+    }
+  },
+  "variables": {
+    "allBools": [
+      "true",
+      "false"
+    ],
+    "allSeverities": [
+      "Low",
+      "Medium",
+      "High"
+    ],
+    "allModes": [
+      "Default",
+      "Asynchronous_filter"
+    ],
+    "permissiveBase": {
+      "allowedHateBlockingForCompletion": {
+        "value": "[variables('allBools')]"
+      },
+      "allowedHateBlockingForPrompt": {
+        "value": "[variables('allBools')]"
+      },
+      "allowedHateEnabledForCompletion": {
+        "value": "[variables('allBools')]"
+      },
+      "allowedHateEnabledForPrompt": {
+        "value": "[variables('allBools')]"
+      },
+      "allowedHateSeveritiesForCompletion": {
+        "value": "[variables('allSeverities')]"
+      },
+      "allowedHateSeveritiesForPrompt": {
+        "value": "[variables('allSeverities')]"
+      },
+      "allowedIndirectAttackBlockingForPrompt": {
+        "value": "[variables('allBools')]"
+      },
+      "allowedIndirectAttackEnabledForPrompt": {
+        "value": "[variables('allBools')]"
+      },
+      "allowedJailbreakBlockingForPrompt": {
+        "value": "[variables('allBools')]"
+      },
+      "allowedJailbreakEnabledForPrompt": {
+        "value": "[variables('allBools')]"
+      },
+      "allowedProfanityBlockingForCompletion": {
+        "value": "[variables('allBools')]"
+      },
+      "allowedProfanityBlockingForPrompt": {
+        "value": "[variables('allBools')]"
+      },
+      "allowedProfanityEnabledForCompletion": {
+        "value": "[variables('allBools')]"
+      },
+      "allowedProfanityEnabledForPrompt": {
+        "value": "[variables('allBools')]"
+      },
+      "allowedProtectedMaterialCodeBlockingForCompletion": {
+        "value": "[variables('allBools')]"
+      },
+      "allowedProtectedMaterialCodeEnabledForCompletion": {
+        "value": "[variables('allBools')]"
+      },
+      "allowedProtectedMaterialTextBlockingForCompletion": {
+        "value": "[variables('allBools')]"
+      },
+      "allowedProtectedMaterialTextEnabledForCompletion": {
+        "value": "[variables('allBools')]"
+      },
+      "allowedSelfharmBlockingForCompletion": {
+        "value": "[variables('allBools')]"
+      },
+      "allowedSelfharmBlockingForPrompt": {
+        "value": "[variables('allBools')]"
+      },
+      "allowedSelfharmEnabledForCompletion": {
+        "value": "[variables('allBools')]"
+      },
+      "allowedSelfharmEnabledForPrompt": {
+        "value": "[variables('allBools')]"
+      },
+      "allowedSelfharmSeveritiesForCompletion": {
+        "value": "[variables('allSeverities')]"
+      },
+      "allowedSelfharmSeveritiesForPrompt": {
+        "value": "[variables('allSeverities')]"
+      },
+      "allowedSexualBlockingForCompletion": {
+        "value": "[variables('allBools')]"
+      },
+      "allowedSexualBlockingForPrompt": {
+        "value": "[variables('allBools')]"
+      },
+      "allowedSexualEnabledForCompletion": {
+        "value": "[variables('allBools')]"
+      },
+      "allowedSexualEnabledForPrompt": {
+        "value": "[variables('allBools')]"
+      },
+      "allowedSexualSeveritiesForCompletion": {
+        "value": "[variables('allSeverities')]"
+      },
+      "allowedSexualSeveritiesForPrompt": {
+        "value": "[variables('allSeverities')]"
+      },
+      "allowedSpotlightingBlockingForPrompt": {
+        "value": "[variables('allBools')]"
+      },
+      "allowedSpotlightingEnabledForPrompt": {
+        "value": "[variables('allBools')]"
+      },
+      "allowedViolenceBlockingForCompletion": {
+        "value": "[variables('allBools')]"
+      },
+      "allowedViolenceBlockingForPrompt": {
+        "value": "[variables('allBools')]"
+      },
+      "allowedViolenceEnabledForCompletion": {
+        "value": "[variables('allBools')]"
+      },
+      "allowedViolenceEnabledForPrompt": {
+        "value": "[variables('allBools')]"
+      },
+      "allowedViolenceSeveritiesForCompletion": {
+        "value": "[variables('allSeverities')]"
+      },
+      "allowedViolenceSeveritiesForPrompt": {
+        "value": "[variables('allSeverities')]"
+      },
+      "raiPolicyMode": {
+        "value": "[variables('allModes')]"
+      }
+    }
+  },
+  "resources": [
+    {
+      "type": "Microsoft.Authorization/policyAssignments",
+      "apiVersion": "2023-04-01",
+      "name": "[format('{0}-indirect-attack', parameters('namePrefix'))]",
+      "properties": {
+        "displayName": "indirect-attack",
+        "description": "Enforces Prompt Shields indirect-attack (XPIA) protection: model deployments must keep indirect_attack enabled and blocking on Prompt.",
+        "policyDefinitionId": "[parameters('guardrailInitiativeId')]",
+        "definitionVersion": "[parameters('definitionVersion')]",
+        "enforcementMode": "Default",
+        "parameters": "[union(variables('permissiveBase'), createObject('allowedIndirectAttackEnabledForPrompt', createObject('value', createArray('true')), 'allowedIndirectAttackBlockingForPrompt', createObject('value', createArray('true'))))]"
+      }
+    },
+    {
+      "type": "Microsoft.Authorization/policyAssignments",
+      "apiVersion": "2023-04-01",
+      "name": "[format('{0}-hate', parameters('namePrefix'))]",
+      "properties": {
+        "displayName": "hate",
+        "description": "Enforces hate-content filtering at severity Low (blocking) on both Prompt and Completion.",
+        "policyDefinitionId": "[parameters('guardrailInitiativeId')]",
+        "definitionVersion": "[parameters('definitionVersion')]",
+        "enforcementMode": "Default",
+        "parameters": "[union(variables('permissiveBase'), createObject('allowedHateEnabledForPrompt', createObject('value', createArray('true')), 'allowedHateEnabledForCompletion', createObject('value', createArray('true')), 'allowedHateBlockingForPrompt', createObject('value', createArray('true')), 'allowedHateBlockingForCompletion', createObject('value', createArray('true')), 'allowedHateSeveritiesForPrompt', createObject('value', createArray('Low')), 'allowedHateSeveritiesForCompletion', createObject('value', createArray('Low'))))]"
+      }
+    },
+    {
+      "type": "Microsoft.Authorization/policyAssignments",
+      "apiVersion": "2023-04-01",
+      "name": "[format('{0}-sexual', parameters('namePrefix'))]",
+      "properties": {
+        "displayName": "sexual",
+        "description": "Enforces sexual-content filtering at severity Low (blocking) on both Prompt and Completion.",
+        "policyDefinitionId": "[parameters('guardrailInitiativeId')]",
+        "definitionVersion": "[parameters('definitionVersion')]",
+        "enforcementMode": "Default",
+        "parameters": "[union(variables('permissiveBase'), createObject('allowedSexualEnabledForPrompt', createObject('value', createArray('true')), 'allowedSexualEnabledForCompletion', createObject('value', createArray('true')), 'allowedSexualBlockingForPrompt', createObject('value', createArray('true')), 'allowedSexualBlockingForCompletion', createObject('value', createArray('true')), 'allowedSexualSeveritiesForPrompt', createObject('value', createArray('Low')), 'allowedSexualSeveritiesForCompletion', createObject('value', createArray('Low'))))]"
+      }
+    },
+    {
+      "type": "Microsoft.Authorization/policyAssignments",
+      "apiVersion": "2023-04-01",
+      "name": "[format('{0}-violence', parameters('namePrefix'))]",
+      "properties": {
+        "displayName": "violence",
+        "description": "Enforces violence-content filtering at severity Low (blocking) on both Prompt and Completion.",
+        "policyDefinitionId": "[parameters('guardrailInitiativeId')]",
+        "definitionVersion": "[parameters('definitionVersion')]",
+        "enforcementMode": "Default",
+        "parameters": "[union(variables('permissiveBase'), createObject('allowedViolenceEnabledForPrompt', createObject('value', createArray('true')), 'allowedViolenceEnabledForCompletion', createObject('value', createArray('true')), 'allowedViolenceBlockingForPrompt', createObject('value', createArray('true')), 'allowedViolenceBlockingForCompletion', createObject('value', createArray('true')), 'allowedViolenceSeveritiesForPrompt', createObject('value', createArray('Low')), 'allowedViolenceSeveritiesForCompletion', createObject('value', createArray('Low'))))]"
+      }
+    },
+    {
+      "type": "Microsoft.Authorization/policyAssignments",
+      "apiVersion": "2023-04-01",
+      "name": "[format('{0}-self-harm', parameters('namePrefix'))]",
+      "properties": {
+        "displayName": "self-harm",
+        "description": "Enforces self-harm content filtering at severity Low (blocking) on both Prompt and Completion.",
+        "policyDefinitionId": "[parameters('guardrailInitiativeId')]",
+        "definitionVersion": "[parameters('definitionVersion')]",
+        "enforcementMode": "Default",
+        "parameters": "[union(variables('permissiveBase'), createObject('allowedSelfharmEnabledForPrompt', createObject('value', createArray('true')), 'allowedSelfharmEnabledForCompletion', createObject('value', createArray('true')), 'allowedSelfharmBlockingForPrompt', createObject('value', createArray('true')), 'allowedSelfharmBlockingForCompletion', createObject('value', createArray('true')), 'allowedSelfharmSeveritiesForPrompt', createObject('value', createArray('Low')), 'allowedSelfharmSeveritiesForCompletion', createObject('value', createArray('Low'))))]"
+      }
+    },
+    {
+      "type": "Microsoft.Authorization/policyAssignments",
+      "apiVersion": "2023-04-01",
+      "name": "[format('{0}-profanity', parameters('namePrefix'))]",
+      "properties": {
+        "displayName": "profanity",
+        "description": "Enforces profanity filtering (blocking) on both Prompt and Completion.",
+        "policyDefinitionId": "[parameters('guardrailInitiativeId')]",
+        "definitionVersion": "[parameters('definitionVersion')]",
+        "enforcementMode": "Default",
+        "parameters": "[union(variables('permissiveBase'), createObject('allowedProfanityEnabledForPrompt', createObject('value', createArray('true')), 'allowedProfanityEnabledForCompletion', createObject('value', createArray('true')), 'allowedProfanityBlockingForPrompt', createObject('value', createArray('true')), 'allowedProfanityBlockingForCompletion', createObject('value', createArray('true'))))]"
+      }
+    },
+    {
+      "type": "Microsoft.Authorization/policyAssignments",
+      "apiVersion": "2023-04-01",
+      "name": "[format('{0}-protected-material-text', parameters('namePrefix'))]",
+      "properties": {
+        "displayName": "protected-material-text",
+        "description": "Enforces protected-material-text filtering (blocking) on Completion. Catches copyrighted lyrics/articles regurgitation.",
+        "policyDefinitionId": "[parameters('guardrailInitiativeId')]",
+        "definitionVersion": "[parameters('definitionVersion')]",
+        "enforcementMode": "Default",
+        "parameters": "[union(variables('permissiveBase'), createObject('allowedProtectedMaterialTextEnabledForCompletion', createObject('value', createArray('true')), 'allowedProtectedMaterialTextBlockingForCompletion', createObject('value', createArray('true'))))]"
+      }
+    },
+    {
+      "type": "Microsoft.Authorization/policyAssignments",
+      "apiVersion": "2023-04-01",
+      "name": "[format('{0}-protected-material-code', parameters('namePrefix'))]",
+      "properties": {
+        "displayName": "protected-material-code",
+        "description": "Enforces protected-material-code filtering (blocking) on Completion. Catches licensed source-code regurgitation.",
+        "policyDefinitionId": "[parameters('guardrailInitiativeId')]",
+        "definitionVersion": "[parameters('definitionVersion')]",
+        "enforcementMode": "Default",
+        "parameters": "[union(variables('permissiveBase'), createObject('allowedProtectedMaterialCodeEnabledForCompletion', createObject('value', createArray('true')), 'allowedProtectedMaterialCodeBlockingForCompletion', createObject('value', createArray('true'))))]"
+      }
+    },
+    {
+      "type": "Microsoft.Authorization/policyAssignments",
+      "apiVersion": "2023-04-01",
+      "name": "[format('{0}-spotlighting', parameters('namePrefix'))]",
+      "properties": {
+        "displayName": "spotlighting",
+        "description": "Enforces spotlighting (indirect-attack delimitation marking) on Prompt. Required when grounding docs are injected into the prompt.",
+        "policyDefinitionId": "[parameters('guardrailInitiativeId')]",
+        "definitionVersion": "[parameters('definitionVersion')]",
+        "enforcementMode": "Default",
+        "parameters": "[union(variables('permissiveBase'), createObject('allowedSpotlightingEnabledForPrompt', createObject('value', createArray('true')), 'allowedSpotlightingBlockingForPrompt', createObject('value', createArray('true'))))]"
+      }
+    }
+  ],
+  "outputs": {
+    "perRiskAssignmentIds": {
+      "type": "array",
+      "value": [
+        "[subscriptionResourceId('Microsoft.Authorization/policyAssignments', format('{0}-indirect-attack', parameters('namePrefix')))]",
+        "[subscriptionResourceId('Microsoft.Authorization/policyAssignments', format('{0}-hate', parameters('namePrefix')))]",
+        "[subscriptionResourceId('Microsoft.Authorization/policyAssignments', format('{0}-sexual', parameters('namePrefix')))]",
+        "[subscriptionResourceId('Microsoft.Authorization/policyAssignments', format('{0}-violence', parameters('namePrefix')))]",
+        "[subscriptionResourceId('Microsoft.Authorization/policyAssignments', format('{0}-self-harm', parameters('namePrefix')))]",
+        "[subscriptionResourceId('Microsoft.Authorization/policyAssignments', format('{0}-profanity', parameters('namePrefix')))]",
+        "[subscriptionResourceId('Microsoft.Authorization/policyAssignments', format('{0}-protected-material-text', parameters('namePrefix')))]",
+        "[subscriptionResourceId('Microsoft.Authorization/policyAssignments', format('{0}-protected-material-code', parameters('namePrefix')))]",
+        "[subscriptionResourceId('Microsoft.Authorization/policyAssignments', format('{0}-spotlighting', parameters('namePrefix')))]"
+      ]
+    }
+  }
+}

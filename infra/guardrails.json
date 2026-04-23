@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.39.26.7824",
-      "templateHash": "14652370722512146033"
+      "templateHash": "18177157106976291864"
     }
   },
   "parameters": {
@@ -119,6 +119,130 @@
         "blocking": true,
         "enabled": true
       }
+    ],
+    "balancedFilters": [
+      {
+        "name": "hate",
+        "source": "Prompt",
+        "severityThreshold": "Medium",
+        "blocking": true,
+        "enabled": true
+      },
+      {
+        "name": "hate",
+        "source": "Completion",
+        "severityThreshold": "Medium",
+        "blocking": true,
+        "enabled": true
+      },
+      {
+        "name": "sexual",
+        "source": "Prompt",
+        "severityThreshold": "Medium",
+        "blocking": true,
+        "enabled": true
+      },
+      {
+        "name": "sexual",
+        "source": "Completion",
+        "severityThreshold": "Medium",
+        "blocking": true,
+        "enabled": true
+      },
+      {
+        "name": "violence",
+        "source": "Prompt",
+        "severityThreshold": "Medium",
+        "blocking": true,
+        "enabled": true
+      },
+      {
+        "name": "violence",
+        "source": "Completion",
+        "severityThreshold": "Medium",
+        "blocking": true,
+        "enabled": true
+      },
+      {
+        "name": "selfharm",
+        "source": "Prompt",
+        "severityThreshold": "Low",
+        "blocking": true,
+        "enabled": true
+      },
+      {
+        "name": "selfharm",
+        "source": "Completion",
+        "severityThreshold": "Low",
+        "blocking": true,
+        "enabled": true
+      }
+    ],
+    "permissiveFilters": [
+      {
+        "name": "hate",
+        "source": "Prompt",
+        "severityThreshold": "High",
+        "blocking": true,
+        "enabled": true
+      },
+      {
+        "name": "hate",
+        "source": "Completion",
+        "severityThreshold": "High",
+        "blocking": true,
+        "enabled": true
+      },
+      {
+        "name": "sexual",
+        "source": "Prompt",
+        "severityThreshold": "High",
+        "blocking": true,
+        "enabled": true
+      },
+      {
+        "name": "sexual",
+        "source": "Completion",
+        "severityThreshold": "High",
+        "blocking": true,
+        "enabled": true
+      },
+      {
+        "name": "violence",
+        "source": "Prompt",
+        "severityThreshold": "High",
+        "blocking": true,
+        "enabled": true
+      },
+      {
+        "name": "violence",
+        "source": "Completion",
+        "severityThreshold": "High",
+        "blocking": true,
+        "enabled": true
+      },
+      {
+        "name": "selfharm",
+        "source": "Prompt",
+        "severityThreshold": "Medium",
+        "blocking": true,
+        "enabled": true
+      },
+      {
+        "name": "selfharm",
+        "source": "Completion",
+        "severityThreshold": "Medium",
+        "blocking": true,
+        "enabled": true
+      }
+    ],
+    "permissivePromptProtection": [
+      {
+        "name": "jailbreak",
+        "source": "Prompt",
+        "blocking": true,
+        "enabled": true
+      }
     ]
   },
   "resources": [
@@ -128,6 +252,22 @@
       "name": "[format('{0}/{1}', parameters('accountName'), parameters('blocklistName'))]",
       "properties": {
         "description": "Blocks PII patterns (SSN, credit cards, bank accounts) in prompts and completions"
+      }
+    },
+    {
+      "type": "Microsoft.CognitiveServices/accounts/raiBlocklists",
+      "apiVersion": "2024-10-01",
+      "name": "[format('{0}/{1}', parameters('accountName'), 'aisec-secrets-keywords')]",
+      "properties": {
+        "description": "Blocks credentials, API keys, internal codenames, and infrastructure identifiers"
+      }
+    },
+    {
+      "type": "Microsoft.CognitiveServices/accounts/raiBlocklists",
+      "apiVersion": "2024-10-01",
+      "name": "[format('{0}/{1}', parameters('accountName'), 'aisec-competitor-names')]",
+      "properties": {
+        "description": "Demo blocklist — restricts mentions of competitor brand names in agent responses"
       }
     },
     {
@@ -156,6 +296,51 @@
       ]
     },
     {
+      "type": "Microsoft.CognitiveServices/accounts/raiPolicies",
+      "apiVersion": "2024-10-01",
+      "name": "[format('{0}/{1}', parameters('accountName'), 'aisec-balanced')]",
+      "properties": {
+        "basePolicyName": "Microsoft.DefaultV2",
+        "mode": "Blocking",
+        "contentFilters": "[concat(variables('balancedFilters'), variables('promptProtection'), variables('materialProtection'))]",
+        "customBlocklists": [
+          {
+            "blocklistName": "aisec-secrets-keywords",
+            "blocking": true,
+            "source": "Prompt"
+          },
+          {
+            "blocklistName": "aisec-secrets-keywords",
+            "blocking": true,
+            "source": "Completion"
+          }
+        ]
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.CognitiveServices/accounts/raiBlocklists', parameters('accountName'), 'aisec-secrets-keywords')]"
+      ]
+    },
+    {
+      "type": "Microsoft.CognitiveServices/accounts/raiPolicies",
+      "apiVersion": "2024-10-01",
+      "name": "[format('{0}/{1}', parameters('accountName'), 'aisec-permissive')]",
+      "properties": {
+        "basePolicyName": "Microsoft.DefaultV2",
+        "mode": "Blocking",
+        "contentFilters": "[concat(variables('permissiveFilters'), variables('permissivePromptProtection'))]",
+        "customBlocklists": [
+          {
+            "blocklistName": "aisec-competitor-names",
+            "blocking": false,
+            "source": "Completion"
+          }
+        ]
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.CognitiveServices/accounts/raiBlocklists', parameters('accountName'), 'aisec-competitor-names')]"
+      ]
+    },
+    {
       "type": "Microsoft.CognitiveServices/accounts/deployments",
       "apiVersion": "2026-01-15-preview",
       "name": "[format('{0}/{1}', parameters('accountName'), parameters('modelDeploymentName'))]",
@@ -181,9 +366,25 @@
       "type": "string",
       "value": "[parameters('policyName')]"
     },
+    "raiPolicyBalancedName": {
+      "type": "string",
+      "value": "aisec-balanced"
+    },
+    "raiPolicyPermissiveName": {
+      "type": "string",
+      "value": "aisec-permissive"
+    },
     "blocklistName": {
       "type": "string",
       "value": "[parameters('blocklistName')]"
+    },
+    "secretsBlocklistName": {
+      "type": "string",
+      "value": "aisec-secrets-keywords"
+    },
+    "competitorBlocklistName": {
+      "type": "string",
+      "value": "aisec-competitor-names"
     },
     "modelDeploymentName": {
       "type": "string",

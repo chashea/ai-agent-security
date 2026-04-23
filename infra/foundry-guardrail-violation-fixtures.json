@@ -1,0 +1,112 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "metadata": {
+    "_generator": {
+      "name": "bicep",
+      "version": "0.39.26.7824",
+      "templateHash": "16310210100928251626"
+    }
+  },
+  "parameters": {
+    "accountName": {
+      "type": "string",
+      "defaultValue": "aisec-foundry",
+      "metadata": {
+        "description": "Foundry account name (Microsoft.CognitiveServices/accounts)."
+      }
+    },
+    "weakRaiPolicyName": {
+      "type": "string",
+      "defaultValue": "aisec-permissive",
+      "metadata": {
+        "description": "Weak RAI policy to bind to the demo deployment. Must already exist on the account. `aisec-permissive` (from guardrails.bicep) has severity High on hate/sexual/violence, no indirect_attack, no protected_material, no profanity — trips multiple per-risk policies."
+      }
+    },
+    "partialRaiPolicyName": {
+      "type": "string",
+      "defaultValue": "aisec-balanced",
+      "metadata": {
+        "description": "Partial-coverage RAI policy to bind to the 2nd demo deployment. `aisec-balanced` (from guardrails.bicep) uses severity Medium on hate/sexual/violence and has no profanity filter — trips those per-risk policies."
+      }
+    },
+    "weakDeploymentName": {
+      "type": "string",
+      "defaultValue": "gpt-4o-demo-weak",
+      "metadata": {
+        "description": "Model deployment name for the weak fixture."
+      }
+    },
+    "partialDeploymentName": {
+      "type": "string",
+      "defaultValue": "gpt-4o-demo-partial",
+      "metadata": {
+        "description": "Model deployment name for the partial fixture."
+      }
+    },
+    "capacity": {
+      "type": "int",
+      "defaultValue": 1,
+      "metadata": {
+        "description": "Minimum TPM capacity (GlobalStandard SKU units, thousands/min). Keep low since these are compliance fixtures not serving traffic."
+      }
+    }
+  },
+  "resources": [
+    {
+      "type": "Microsoft.CognitiveServices/accounts/deployments",
+      "apiVersion": "2026-01-15-preview",
+      "name": "[format('{0}/{1}', parameters('accountName'), parameters('weakDeploymentName'))]",
+      "sku": {
+        "name": "GlobalStandard",
+        "capacity": "[parameters('capacity')]"
+      },
+      "properties": {
+        "model": {
+          "format": "OpenAI",
+          "name": "gpt-4o",
+          "version": "2024-11-20"
+        },
+        "raiPolicyName": "[parameters('weakRaiPolicyName')]"
+      }
+    },
+    {
+      "type": "Microsoft.CognitiveServices/accounts/deployments",
+      "apiVersion": "2026-01-15-preview",
+      "name": "[format('{0}/{1}', parameters('accountName'), parameters('partialDeploymentName'))]",
+      "sku": {
+        "name": "GlobalStandard",
+        "capacity": "[parameters('capacity')]"
+      },
+      "properties": {
+        "model": {
+          "format": "OpenAI",
+          "name": "gpt-4o",
+          "version": "2024-11-20"
+        },
+        "raiPolicyName": "[parameters('partialRaiPolicyName')]"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.CognitiveServices/accounts/deployments', parameters('accountName'), parameters('weakDeploymentName'))]"
+      ]
+    }
+  ],
+  "outputs": {
+    "weakDeploymentId": {
+      "type": "string",
+      "value": "[resourceId('Microsoft.CognitiveServices/accounts/deployments', parameters('accountName'), parameters('weakDeploymentName'))]"
+    },
+    "partialDeploymentId": {
+      "type": "string",
+      "value": "[resourceId('Microsoft.CognitiveServices/accounts/deployments', parameters('accountName'), parameters('partialDeploymentName'))]"
+    },
+    "weakDeploymentName": {
+      "type": "string",
+      "value": "[parameters('weakDeploymentName')]"
+    },
+    "partialDeploymentName": {
+      "type": "string",
+      "value": "[parameters('partialDeploymentName')]"
+    }
+  }
+}
