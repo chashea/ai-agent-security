@@ -603,6 +603,40 @@ def build_tool_definitions(
         elif tool_type == "image_generation":
             definitions.append({"type": "image_generation"})
 
+        elif tool_type == "connected_agent":
+            # connected_agent — classic Foundry Connected Agents pattern.
+            # Target agent is resolved by `targetName` against agentsManifest.
+            # Tool call name must be letters/underscores only (machine-readable)
+            # — derived from `name` field if present, else from the target name
+            # with dashes converted to underscores.
+            target_name = tool.get("targetName") or tool.get("target") or ""
+            tool_call_name = tool.get("name") or target_name.replace("-", "_").replace(" ", "_")
+            description = tool.get("description") or f"Delegate tasks to the {target_name} agent."
+            if not agents_manifest:
+                log.warning(
+                    "connected_agent tool skipped: agentsManifest empty "
+                    "(tool refresh pass not yet run)."
+                )
+                continue
+            target = next(
+                (a for a in agents_manifest if (a.get("name") or "") == target_name),
+                None,
+            )
+            if not target or not target.get("id"):
+                log.warning(
+                    "connected_agent tool skipped: target agent '%s' not found "
+                    "in agentsManifest.", target_name,
+                )
+                continue
+            definitions.append({
+                "type": "connected_agent",
+                "connected_agent": {
+                    "id": target["id"],
+                    "name": tool_call_name,
+                    "description": description,
+                },
+            })
+
     return definitions
 
 

@@ -491,6 +491,7 @@ function Deploy-Foundry {
             agentsManifest  = @($manifest.agents | ForEach-Object {
                 [ordered]@{
                     name        = [string]$_.name
+                    id          = [string]$_.id
                     baseUrl     = [string]$_.baseUrl
                     description = ''
                 }
