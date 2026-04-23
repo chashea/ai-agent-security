@@ -30,6 +30,70 @@ def _get_token(credential: DefaultAzureCredential, scope: str) -> str:
     return credential.get_token(scope).token
 
 
+def _list_live_agents(project_endpoint: str, data_token: str, api_version: str) -> dict[str, str]:
+    """Return {agent_id: agent_name} for every agent currently deployed in the
+    Foundry project. Empty dict on error (caller should treat as 'unknown' and
+    skip filtering to avoid false-negative runs).
+    """
+    url = f"{project_endpoint.rstrip('/')}/agents?api-version={api_version}"
+    headers = {"Authorization": f"Bearer {data_token}", "Content-Type": "application/json"}
+    try:
+        resp = requests.get(url, headers=headers, timeout=30)
+    except requests.RequestException as exc:
+        log.warning("Live agent list request failed (%s); skipping deployed-agent filter.", exc)
+        return {}
+    if resp.status_code >= 400:
+        log.warning(
+            "Live agent list returned HTTP %d (%s); skipping deployed-agent filter.",
+            resp.status_code,
+            resp.text[:200],
+        )
+        return {}
+    try:
+        body = resp.json()
+    except ValueError:
+        log.warning("Live agent list returned non-JSON body; skipping deployed-agent filter.")
+        return {}
+    entries = body.get("data") if isinstance(body, dict) else body
+    if not isinstance(entries, list):
+        return {}
+    result: dict[str, str] = {}
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        agent_id = entry.get("id") or entry.get("assistant_id") or ""
+        agent_name = entry.get("name") or ""
+        if agent_id:
+            result[agent_id] = agent_name
+    return result
+
+
+def _filter_to_deployed(input_agents: list, live: dict[str, str]) -> list:
+    """Drop agents whose `id` is not in the live project. Log each drop.
+    If the live dict is empty (lookup failed or project empty), return the
+    input unchanged so we never silently skip a whole run.
+    """
+    if not live:
+        return input_agents
+    kept: list = []
+    dropped: list = []
+    for agent in input_agents:
+        agent_id = str(agent.get("id") or "")
+        agent_name = str(agent.get("name") or "unknown")
+        if agent_id and agent_id in live:
+            kept.append(agent)
+        else:
+            dropped.append(f"{agent_name} (id={agent_id or '<none>'})")
+    if dropped:
+        log.warning(
+            "Skipping %d agent(s) not present in Foundry project: %s",
+            len(dropped),
+            ", ".join(dropped),
+        )
+    log.info("Evaluations will run against %d live agent(s).", len(kept))
+    return kept
+
+
 def _data_headers(token: str) -> dict:
     return {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
 
@@ -278,9 +342,17 @@ def run_sdk_evaluations(config: dict) -> list:
 
     credential = DefaultAzureCredential()
     project_endpoint = config["projectEndpoint"]
+    sdk_api_version = config.get("agentApiVersion", "2025-05-15-preview")
     agents = config.get("agents", [])
     eval_config = config.get("evaluations", {})
     model_deployment = config.get("modelDeploymentName", "gpt-4o")
+
+    live = _list_live_agents(
+        project_endpoint,
+        _get_token(credential, "https://ai.azure.com/.default"),
+        sdk_api_version,
+    )
+    agents = _filter_to_deployed(agents, live)
 
     quality_evals = eval_config.get("batchEvaluators", {}).get("quality", [])
     safety_evals = eval_config.get("batchEvaluators", {}).get("safety", [])
@@ -397,9 +469,13 @@ def run_evaluation_pipeline(config: dict) -> dict:
     # Evaluation endpoints (evaluators, evaluations, prompt-optimizations,
     # continuous-evaluation) require a newer api-version than the agents API.
     api_version = config.get("evalApiVersion", "2025-11-15-preview")
+    agent_api_version = config.get("agentApiVersion", "2025-05-15-preview")
     agents = config.get("agents", [])
     eval_config = config.get("evaluations", {})
     model_deployment = config.get("modelDeploymentName", "gpt-4o")
+
+    live = _list_live_agents(project_endpoint, data_token, agent_api_version)
+    agents = _filter_to_deployed(agents, live)
 
     results: dict = {
         "promptOptimization": [],
