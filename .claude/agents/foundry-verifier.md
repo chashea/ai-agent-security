@@ -36,9 +36,8 @@ For each agent in `config.json` → `workloads.foundry.agents[]`:
 
 ## How to run
 
-Load the Foundry context from memory or from the config:
+Load the Foundry context from the config:
 
-- Project memory: `~/.claude/projects/-Users-charlesshea/memory/project_ai_agent_security.md`
 - Config: `config.json` → `workloads.foundry.subscriptionId`, `resourceGroup`, `accountName`, `projectName`, `prefix`
 
 Then run this verification script (or an equivalent Python block) with the data plane token:

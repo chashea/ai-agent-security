@@ -4,11 +4,15 @@
 .PARAMETER SinceMinutes  Lookback window (default 120).
 .PARAMETER Top           Max per resource (default 50).
 .PARAMETER Output        Optional JSON output path.
+.PARAMETER TenantId      Target Entra tenant. Defaults to $env:AZURE_TENANT_ID;
+                         if neither is set, falls back to the current Graph
+                         context or prompts interactively.
 #>
 param(
     [int]$SinceMinutes = 120,
     [int]$Top = 50,
-    [string]$Output
+    [string]$Output,
+    [string]$TenantId = $env:AZURE_TENANT_ID
 )
 
 $ErrorActionPreference = 'Stop'
@@ -19,7 +23,9 @@ $ctx = Get-MgContext -ErrorAction SilentlyContinue
 $missing = $scopes | Where-Object { -not $ctx -or $_ -notin $ctx.Scopes }
 if ($missing) {
     Write-Host "Connecting to Graph (device code)..." -ForegroundColor Cyan
-    Connect-MgGraph -Scopes $scopes -TenantId 'f1b92d41-6d54-4102-9dd9-4208451314df' -NoWelcome
+    $connectArgs = @{ Scopes = $scopes; NoWelcome = $true }
+    if ($TenantId) { $connectArgs.TenantId = $TenantId }
+    Connect-MgGraph @connectArgs
 }
 
 $since = (Get-Date).ToUniversalTime().AddMinutes(-$SinceMinutes).ToString('yyyy-MM-ddTHH:mm:ssZ')

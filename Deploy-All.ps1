@@ -63,7 +63,7 @@
     'az deployment sub what-if'.
 
 .EXAMPLE
-    ./Deploy-All.ps1 -TenantId 'f1b92d41-6d54-4102-9dd9-4208451314df'
+    ./Deploy-All.ps1 -TenantId '<TENANT_ID>'
 
 .EXAMPLE
     ./Deploy-All.ps1 -TenantId '<tid>' -GuardrailEffect Deny -GuardrailsFirst

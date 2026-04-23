@@ -19,9 +19,9 @@ Single config file (`config.json`), modular by workload, deploy + teardown symme
 
 ## Tenant
 
-| Environment | Tenant ID | Domain |
-|---|---|---|
-| **Commercial** | `f1b92d41-6d54-4102-9dd9-4208451314df` | `MngEnvMCAP648165.onmicrosoft.com` |
+Target tenant is configured per-user in `config.json` (copy from
+`config.sample.json`); CI and tests use a fixture domain. Helper scripts
+that need a tenant ID read from `-TenantId` or `$env:AZURE_TENANT_ID`.
 
 ## Commands
 

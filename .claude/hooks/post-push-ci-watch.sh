@@ -8,7 +8,10 @@
 # "--dry-run". Silent no-op for non-matching commands.
 
 set -u
-REPO="/Users/charlesshea/repos/ai-agent-security"
+# Resolve the repo root portably:
+#   1. $CLAUDE_PROJECT_DIR — set by Claude Code when the hook fires
+#   2. git rev-parse — fallback for manual invocation
+REPO="${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
 
 # Read tool input JSON from stdin.
 payload="$(cat)"

@@ -37,3 +37,6 @@ packages/
 
 # Runtime logs (transcripts + trend HTML)
 logs/
+
+# Tenant-specific deploy config (copy config.sample.json → config.json and fill in)
+config.json

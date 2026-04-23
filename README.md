@@ -17,6 +17,40 @@ Deploy AI agents from Azure AI Foundry and automatically wrap them with:
 - **Defender for Cloud** — Security posture management for Foundry infrastructure
 - **AI Red Teaming** — Automated adversarial probing via Microsoft's AI Red Teaming Agent (PyRIT-backed), with attack strategies (jailbreak, encoding bypass, prompt injection, multi-turn escalation) and ASR scorecards
 
+## Getting started
+
+Clone the repo, copy the sample config, and fill in your tenant-specific
+values. `config.json` is git-ignored so your real values stay local.
+
+```bash
+git clone https://github.com/chashea/ai-agent-security.git
+cd ai-agent-security
+cp config.sample.json config.json
+```
+
+Edit `config.json` and replace every placeholder:
+
+| Placeholder         | What to put                                                 |
+|---------------------|-------------------------------------------------------------|
+| `<SUBSCRIPTION_ID>` | Azure subscription ID (`az account show --query id -o tsv`) |
+| `<TENANT_DOMAIN>`   | Your Entra tenant's primary domain, e.g. `contoso.onmicrosoft.com` |
+| `<PUBLISHER_UPN>`   | UPN used for APIM publisher contact + agent identity        |
+| `<USER_UPN>`        | UPN(s) added to the test groups (Finance/IT/Sales)          |
+
+Then sign in and deploy:
+
+```powershell
+az login --tenant <YOUR_TENANT_ID>
+az account set --subscription <SUBSCRIPTION_ID>
+Connect-AzAccount -Tenant <YOUR_TENANT_ID>
+
+./Deploy.ps1 -ConfigPath config.json
+```
+
+`config.json` carries defaults for agent rosters, knowledge bases,
+evaluations, and guardrail policies — you only need to edit the
+tenant-specific fields above to get a working deploy.
+
 ## Deployment modes
 
 ```powershell

@@ -237,7 +237,7 @@ device code on every `Deploy.ps1` invocation.
 lifetime, typically ~1h):
 
 ```powershell
-pwsh -Command "Connect-MgGraph -Scopes 'AppCatalog.ReadWrite.All' -TenantId 'f1b92d41-6d54-4102-9dd9-4208451314df' -NoWelcome"
+pwsh -Command "Connect-MgGraph -Scopes 'AppCatalog.ReadWrite.All' -TenantId '<YOUR_TENANT_ID>' -NoWelcome"
 ```
 
 MSAL caches the refresh token to `~/.IdentityService`, so subsequent

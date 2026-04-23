@@ -21,7 +21,6 @@ matching entry. Find the match, return the fix pointer — don't guess.
 - `docs/troubleshooting.md` — authoritative root-cause catalog. Every entry follows **Symptom → Root cause → Fix** structure. Start here.
 - `CLAUDE.md` → "Known Constraints & Tenant Requirements" section — constraints that are load-bearing for MCAPS-governed tenants.
 - Recent logs in `logs/AIAgentSec_*.log` if the user is reacting to a current run.
-- Memory: `~/.claude/projects/-Users-charlesshea/memory/project_ai_agent_security.md` for project-specific facts (subscription, tenant, known exemptions).
 
 ## Match strategy
 

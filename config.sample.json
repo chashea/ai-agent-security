@@ -1,7 +1,7 @@
 {
   "labName": "AI Agent Security",
   "prefix": "AISec",
-  "domain": "MngEnvMCAP648165.onmicrosoft.com",
+  "domain": "<TENANT_DOMAIN>",
   "cloud": "commercial",
   "workloads": {
     "aiGateway": {
@@ -9,7 +9,7 @@
       "name": "aisec-aigw",
       "sku": "BasicV2",
       "capacity": 1,
-      "publisherEmail": "charlesshea@MngEnvMCAP648165.onmicrosoft.com",
+      "publisherEmail": "<PUBLISHER_UPN>",
       "publisherName": "AISec AI Gateway",
       "tokensPerMinute": 1000,
       "monthlyTokenQuota": 0,
@@ -20,7 +20,7 @@
     },
     "foundry": {
       "enabled": true,
-      "subscriptionId": "9d02bc65-7c0d-4c6a-b824-da0000cb7c7d",
+      "subscriptionId": "<SUBSCRIPTION_ID>",
       "resourceGroup": "rg-ai-agent-security",
       "location": "eastus2",
       "accountName": "aisec-foundry",
@@ -49,7 +49,7 @@
           "indexName": "aisec-compliance-index"
         },
         "bingSearch": {
-          "resourceId": "/subscriptions/9d02bc65-7c0d-4c6a-b824-da0000cb7c7d/resourceGroups/rg-ai-agent-security/providers/Microsoft.Bing/accounts/aisec-bing-grounding"
+          "resourceId": "/subscriptions/<SUBSCRIPTION_ID>/resourceGroups/rg-ai-agent-security/providers/Microsoft.Bing/accounts/aisec-bing-grounding"
         },
         "blobStorage": {
           "containerName": "aisec-vectorstores"
@@ -58,7 +58,7 @@
           "siteUrl": ""
         },
         "appInsights": {
-          "resourceId": "/subscriptions/9d02bc65-7c0d-4c6a-b824-da0000cb7c7d/resourceGroups/rg-ai-agent-security/providers/Microsoft.Insights/components/aisec-appinsights"
+          "resourceId": "/subscriptions/<SUBSCRIPTION_ID>/resourceGroups/rg-ai-agent-security/providers/Microsoft.Insights/components/aisec-appinsights"
         },
         "a2a": {
           "name": "aisec-a2a"
@@ -661,26 +661,26 @@
       "mode": "existing",
       "users": [
         {
-          "identity": "charlesshea@MngEnvMCAP648165.onmicrosoft.com"
+          "identity": "<PUBLISHER_UPN>"
         }
       ],
       "groups": [
         {
           "displayName": "AISec-Finance-Team",
           "members": [
-            "charlesshea"
+            "<USER_UPN>"
           ]
         },
         {
           "displayName": "AISec-IT-Team",
           "members": [
-            "charlesshea"
+            "<USER_UPN>"
           ]
         },
         {
           "displayName": "AISec-Sales-Team",
           "members": [
-            "charlesshea"
+            "<USER_UPN>"
           ]
         }
       ]
