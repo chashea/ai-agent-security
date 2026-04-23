@@ -31,3 +31,9 @@ scripts/.venv/
 
 # Packages (generated at deploy time)
 packages/
+
+# Claude Code hook state (post-push CI watch marker)
+.claude/pending_ci_watch
+
+# Runtime logs (transcripts + trend HTML)
+logs/

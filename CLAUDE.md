@@ -422,3 +422,39 @@ Every push to `main` gets a new GitHub release with a version tag
 `gh release create vX.Y.Z --title "vX.Y.Z — <headline>" --notes "..."`
 with manual notes; never `--generate-notes`. Current version: **v0.11.0**
 (Security-Triage demo + a2a re-enable + redteam trend HTML).
+
+## Post-push CI watch (automatic)
+
+Any time a `git push` to `origin` succeeds from this repo — whether I
+ran it or the user did — I must autonomously watch the GitHub Actions
+run to completion and repair any failures without being asked. No
+confirmation prompts, no "do you want me to…" — just do it.
+
+**Loop:**
+
+1. Immediately after the push returns, launch the `devops-engineer`
+   subagent with the head SHA and instruct it to poll
+   `gh run watch --exit-status` (or equivalent) until the run finishes.
+2. If the run **succeeds** → report green and stop.
+3. If the run **fails** → launch the appropriate fix subagent
+   (`software-engineer` for code/test failures, `devops-engineer` for
+   workflow or infra-compile failures, `database-engineer` for
+   migration failures) with the failing job's log excerpt. It must
+   apply a real fix (no `--no-verify`, no skipping jobs), commit, and
+   push again.
+4. Return to step 1 with the new SHA. Repeat until the run is green
+   or a fix attempt fails three times in a row — in which case stop
+   and surface the blocker to the user.
+
+**Constraints:**
+
+- Never bypass hooks (`--no-verify`) or disable a failing CI job to
+  force-green. Fix the root cause.
+- Never force-push to `main`.
+- Each fix attempt is its own commit with a descriptive message
+  (`ci: fix <job> — <root cause>`), so the history explains itself.
+- Cache the last watched SHA in memory so re-entering the loop after
+  a fix commit doesn't poll the stale run.
+- If `gh` is not authenticated, stop and tell the user — don't guess.
+
+Applies to this repo only (scope: the `CLAUDE.md` at the repo root).
