@@ -167,10 +167,9 @@ Constraints section.
 1. Foundry — agents + Defender for Cloud posture
 2. AgentIdentity — managed identity RBAC (auto-derived from tools)
 3. AIGateway — APIM v2 in front of Foundry AOAI with TPM + quota + metrics
-4. TestUsers — groups used for label scoping
-5. SensitivityLabels (+ AI Search label-enforcement roles on the index MI)
-6. ConditionalAccess — MFA + risky sign-in block (report-only)
-7. MDCA — session monitoring + activity alerts + app governance
+4. TestUsers — groups used for policy scoping
+5. ConditionalAccess — MFA + risky sign-in block (report-only)
+6. MDCA — session monitoring + activity alerts + app governance
 
 Removal is the exact reverse.
 
@@ -185,7 +184,7 @@ Exceptions: `Prerequisites.psm1`, `Logging.psm1`, `Interactive.psm1`, and `Found
 ### Key Utility Functions (Prerequisites.psm1)
 
 - `Import-LabConfig` — JSON loader with required field validation (labName, prefix, domain)
-- `Test-LabConfigValidity` — validates enabled workloads have required subfields (e.g., sensitivityLabels.labels, conditionalAccess.policies)
+- `Test-LabConfigValidity` — validates enabled workloads have required subfields (e.g., conditionalAccess.policies, mdca.policies)
 - `Invoke-LabRetry -ScriptBlock -MaxAttempts 3 -DelaySeconds 5` — generic retry for transient Graph/EXO failures
 - `Get-LabSupportedParameterName` — inspects cmdlet parameters to handle version differences across module releases
 - `Connect-LabServices` / `Disconnect-LabServices` — multi-service auth (EXO, Graph, optional Azure)

@@ -29,19 +29,11 @@ Describe 'Foundry subscription-level prerequisites' {
     }
 }
 
-Describe 'Sensitivity label AI Search enforcement' {
-    It 'Declares the aiSearchEnforcement block' {
-        $script:Config.workloads.sensitivityLabels.aiSearchEnforcement | Should -Not -BeNullOrEmpty
-    }
-
-    It 'Grants both required Purview roles to the AI Search managed identity' {
-        $roles = @($script:Config.workloads.sensitivityLabels.aiSearchEnforcement.managedIdentityRoles)
-        $roles | Should -Contain 'Content.SuperUser'
-        $roles | Should -Contain 'UnifiedPolicy.Tenant.Read'
-    }
-}
-
 Describe 'Removed workload sections' {
+    It 'Does not declare the sensitivityLabels workload' {
+        $script:Config.workloads.PSObject.Properties['sensitivityLabels'] | Should -BeNullOrEmpty
+    }
+
     It 'Does not declare the dlp workload' {
         $script:Config.workloads.PSObject.Properties['dlp'] | Should -BeNullOrEmpty
     }

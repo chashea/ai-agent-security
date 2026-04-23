@@ -391,8 +391,8 @@ deployment order is:
 
 1. **Foundry** — agents + Defender posture
 2. **AgentIdentity** — RBAC
-3. **TestUsers** — groups
-4. **SensitivityLabels** — labels + auto-label policies
+3. **AIGateway** — APIM v2 + TPM limits
+4. **TestUsers** — groups
 5. **ConditionalAccess** — report-only
 6. **MDCA** — session policies
 
@@ -428,11 +428,6 @@ creating), so re-running is always safe.
 **Foundry fails.**
 No agents exist, but no other workloads are affected. Fix the Foundry
 config and re-run with `-FoundryOnly`.
-
-**SensitivityLabels fails.**
-Agents are deployed but unprotected by labeling policies. Fix the label
-config and re-run the full deploy — earlier workloads will no-op past
-existing resources.
 
 **MDCA fails.**
 Everything else is deployed. Re-run the full deploy; MDCA will skip

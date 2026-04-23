@@ -201,7 +201,7 @@ try {
     }
 
     # Remove workloads in reverse dependency order
-    # Reverse of deploy: MDCA, ConditionalAccess, SensitivityLabels, TestUsers
+    # Reverse of deploy: MDCA, ConditionalAccess, TestUsers
     if (-not $FoundryOnly) {
 
         if ($Config.workloads.PSObject.Properties['mdca'] -and $Config.workloads.mdca.enabled) {
@@ -218,17 +218,6 @@ try {
                 Remove-ConditionalAccess -Config $Config -Manifest (Get-WorkloadManifest -WorkloadName 'conditionalAccess') -WhatIf:$WhatIfPreference
                 Write-LabLog -Message 'Conditional Access removal complete.' -Level Success
             }
-        }
-
-        if ($Config.workloads.PSObject.Properties['sensitivityLabels'] -and $Config.workloads.sensitivityLabels.enabled) {
-            Write-LabStep -StepName 'SensitivityLabels' -Description 'Removing sensitivity labels'
-            Invoke-RemoveWorkload -Name 'SensitivityLabels' -ScriptBlock {
-                Remove-SensitivityLabels -Config $Config -Manifest (Get-WorkloadManifest -WorkloadName 'sensitivityLabels') -WhatIf:$WhatIfPreference
-                Write-LabLog -Message 'Sensitivity Labels removal complete.' -Level Success
-            }
-        }
-        else {
-            Write-LabLog -Message 'sensitivityLabels workload is disabled, skipping.' -Level Info
         }
 
         if ($Config.workloads.PSObject.Properties['testUsers'] -and $Config.workloads.testUsers.enabled) {

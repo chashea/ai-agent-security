@@ -96,8 +96,8 @@ Workload failures are caught per-workload. The orchestrator collects failures an
 
 1. Foundry — agents + Defender for Cloud posture
 2. AgentIdentity — managed identity RBAC (auto-derived from tools)
-3. TestUsers — groups needed for policy scoping
-4. SensitivityLabels — label hierarchy + auto-label policies + AI Search MI roles
+3. AIGateway — APIM v2 + TPM limits + App Insights metrics
+4. TestUsers — groups needed for policy scoping
 5. ConditionalAccess — MFA + risky sign-in block (report-only)
 6. MDCA — session monitoring + activity alerts + app governance
 

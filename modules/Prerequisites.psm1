@@ -586,7 +586,6 @@ function Test-LabConfigValidity {
     }
 
     $workloadRequirements = @{
-        'sensitivityLabels'         = @('labels')
         'testUsers'                 = @('users')
         'conditionalAccess'         = @('policies')
         'mdca'                      = @('policies')

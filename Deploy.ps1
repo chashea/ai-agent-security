@@ -382,13 +382,6 @@ try {
         }
         else { Write-LabLog -Message 'testUsers workload is disabled, skipping.' -Level Info }
 
-        if ($Config.workloads.PSObject.Properties['sensitivityLabels'] -and $Config.workloads.sensitivityLabels.enabled) {
-            Invoke-Workload -Name 'sensitivityLabels' -Step 'SensitivityLabels' -Description 'Deploying sensitivity labels' -Action {
-                Deploy-SensitivityLabels -Config $Config -WhatIf:$WhatIfPreference
-            }
-        }
-        else { Write-LabLog -Message 'sensitivityLabels workload is disabled, skipping.' -Level Info }
-
         if ($Config.workloads.PSObject.Properties['conditionalAccess'] -and $Config.workloads.conditionalAccess.enabled) {
             Invoke-Workload -Name 'conditionalAccess' -Step 'ConditionalAccess' -Description 'Deploying Conditional Access policies' -Action {
                 Deploy-ConditionalAccess -Config $Config -WhatIf:$WhatIfPreference

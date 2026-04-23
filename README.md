@@ -1,6 +1,6 @@
 # ai-agent-security
 
-Secure AI agents deployed from Azure AI Foundry with sensitivity labels and adjacent identity controls.
+Secure AI agents deployed from Azure AI Foundry with adjacent identity and SaaS-app controls.
 
 ![Validate PowerShell](https://github.com/chashea/ai-agent-security/actions/workflows/validate.yml/badge.svg)
 
@@ -8,7 +8,6 @@ Secure AI agents deployed from Azure AI Foundry with sensitivity labels and adja
 
 Deploy AI agents from Azure AI Foundry and automatically wrap them with:
 
-- **Sensitivity labels** — AI-Accessible, AI-Protected, AI-Restricted, Executives-Only, with AI Search enforcement via the index managed identity
 - **Knowledge bases** — Per-agent vector stores (file_search) **plus** a shared Azure AI Search index (`aisec-compliance-index`) with hybrid (keyword + HNSW vector) + semantic ranker, populated from `scripts/demo_docs/` with per-agent `agent_scope` filtering
 - **Guardrails** — Custom RAI policy with tightened content filters (severity Low), jailbreak/indirect attack detection, PII annotation, and custom PII blocklists (SSN, credit card, bank account patterns)
 - **Agent identity** — Managed identity and auto-derived RBAC for agents
@@ -86,7 +85,6 @@ standard scripts with no additional logic:
 - PowerShell 7+
 - Python 3.12+ (for Foundry agent SDK script)
 - Azure Bicep CLI (`az bicep install`)
-- Microsoft 365 E5 or E5 Compliance add-on (for sensitivity labels)
 - Azure subscription (required for Foundry deployment)
 - Required PowerShell modules:
   - `ExchangeOnlineManagement` >= 3.0
@@ -199,7 +197,6 @@ Each workload under `workloads` has an `enabled` boolean. Set to `false` to skip
 | `agentIdentity` | Managed identity and auto-derived RBAC assignments for agent principals |
 | `aiGateway` | APIM-based AI Gateway in front of the Foundry AOAI endpoint with TPM limits, monthly quotas, and App Insights token metrics. See [`docs/ai-gateway.md`](docs/ai-gateway.md). |
 | `testUsers` | User and group provisioning for scoped policy assignment |
-| `sensitivityLabels` | Sensitivity label hierarchy with AI-tier sublabels, auto-label policies, and AI Search MI role grants |
 | `conditionalAccess` | Conditional Access policies (MFA, risky sign-in block) for agent principals — report-only |
 | `mdca` | Defender for Cloud Apps — session policies, activity alerts, OAuth app governance |
 
@@ -320,8 +317,8 @@ Deployment order (dependency-driven):
 ```
 1. Foundry          — agents + Defender for Cloud posture
 2. AgentIdentity    — managed identity RBAC (auto-derived from tools)
-3. TestUsers        — groups used for label scoping
-4. SensitivityLabels — label hierarchy + auto-label policies + AI Search MI roles
+3. AIGateway        — APIM v2 + TPM limits + App Insights metrics
+4. TestUsers        — groups used for policy scoping
 5. ConditionalAccess — MFA + risky sign-in block (report-only)
 6. MDCA              — session monitoring + activity alerts + app governance
 ```
