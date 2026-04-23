@@ -6,14 +6,20 @@
     Config-shape regression tests for ai-agent-security.
 
 .DESCRIPTION
-    Asserts the shape of config.json matches the expected layout for the
-    Foundry + labeling tool. These tests protect against regressions where
-    a contributor reverts a corrected field (e.g., label AI Search roles)
-    or reintroduces a removed workload section.
+    Asserts the shape of config.sample.json matches the expected layout for
+    the Foundry + labeling tool. These tests protect against regressions
+    where a contributor reverts a corrected field (e.g., label AI Search
+    roles) or reintroduces a removed workload section. Prefers the user's
+    local config.json when present, falls back to the tracked sample so CI
+    can run without a populated config.
 #>
 
 BeforeAll {
-    $script:ConfigPath = Join-Path $PSScriptRoot '..' 'config.json'
+    $repoRoot = Join-Path $PSScriptRoot '..'
+    $script:ConfigPath = Join-Path $repoRoot 'config.json'
+    if (-not (Test-Path -Path $script:ConfigPath -PathType Leaf)) {
+        $script:ConfigPath = Join-Path $repoRoot 'config.sample.json'
+    }
     $script:Config = Get-Content -Path $script:ConfigPath -Raw | ConvertFrom-Json
 }
 
@@ -67,10 +73,12 @@ Describe 'Removed workload sections' {
 
 Describe 'Test-LabConfigValidity accepts the full config shape' {
     BeforeAll {
+        Import-Module (Join-Path $PSScriptRoot '..' 'modules' 'Logging.psm1') -Force
         Import-Module (Join-Path $PSScriptRoot '..' 'modules' 'Prerequisites.psm1') -Force
+        $script:UsingRealConfig = (Split-Path -Leaf $script:ConfigPath) -eq 'config.json'
     }
 
-    It 'Returns true for the current config.json' {
+    It 'Returns true for a populated config.json' -Skip:(-not $script:UsingRealConfig) {
         Test-LabConfigValidity -Config $script:Config | Should -BeTrue
     }
 }

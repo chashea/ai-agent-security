@@ -8,7 +8,11 @@ BeforeAll {
 
 Describe 'Import-LabConfig' {
     It 'Loads a valid config file' {
-        $configPath = Join-Path $PSScriptRoot '..' 'config.json'
+        $repoRoot = Join-Path $PSScriptRoot '..'
+        $configPath = Join-Path $repoRoot 'config.json'
+        if (-not (Test-Path -Path $configPath -PathType Leaf)) {
+            $configPath = Join-Path $repoRoot 'config.sample.json'
+        }
         $config = Import-LabConfig -ConfigPath $configPath
         $config | Should -Not -BeNullOrEmpty
         $config.labName | Should -Not -BeNullOrEmpty
