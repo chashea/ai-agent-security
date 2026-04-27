@@ -69,6 +69,33 @@ tenant-specific fields above to get a working deploy.
 ./Deploy.ps1 -ConfigPath config.json -SkipAuth -WhatIf
 ```
 
+### GitHub Actions (OIDC, no laptop required)
+
+For Foundry-only deploys without setting up pwsh / Az / Python locally,
+use the [`Deploy Foundry (OIDC)`](.github/workflows/deploy-foundry.yml)
+workflow. It runs `Deploy.ps1 -FoundryOnly` against your subscription
+using federated credentials — zero stored secrets.
+
+**Setup (one-time):**
+
+1. Create an Entra app registration (or user-assigned managed identity)
+   and grant it the roles in
+   [`.github/workflows/deploy-foundry.yml`](.github/workflows/deploy-foundry.yml)
+   (Contributor + User Access Administrator + Cognitive Services
+   Contributor + Search Service / Index Data Contributor).
+2. Add a federated credential trusting your fork + this workflow —
+   see [Microsoft docs](https://learn.microsoft.com/azure/developer/github/connect-from-azure-openid-connect).
+3. In repo Settings → Secrets and variables → Actions, set the
+   variables `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`,
+   `AZURE_SUBSCRIPTION_ID`.
+4. Run the workflow from the Actions tab → Deploy Foundry (OIDC) →
+   Run workflow, providing the tenant domain and publisher UPN.
+
+Teams catalog publish is gracefully skipped in this path (it needs
+interactive Graph admin consent). Conditional Access / MDCA / EXO
+labels are also skipped — run those locally with the standard
+`./Deploy.ps1` flow.
+
 ### Interactive mode
 
 `Deploy-Interactive.ps1` and `Remove-Interactive.ps1` provide guided prompts
