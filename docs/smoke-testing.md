@@ -94,13 +94,15 @@ Suitable for CI / pre-push integration. The pre-push hook
 Every run gets `uuid4()[:8]` (e.g. `6c442aee`). It's stamped into the
 chat-completions `user` field as `<base>-<run_id>@<tenant-stub>` so
 Defender XDR alerts and Purview DSPM Activity Explorer entries can be
-filtered back to a specific run:
+filtered back to a specific run. Pass `--tenant-stub <your-stub>` (e.g.
+`--tenant-stub contoso`) to match your own tenant short-name; default is
+`aisec-lab`:
 
 ```kql
 // Defender Advanced Hunting — find this run's prompts
 CloudAppEvents
 | where Timestamp > ago(1h)
-| where AccountUpn endswith '6c442aee@mngenvmcap648165'
+| where AccountUpn endswith '<run_id>@<your-tenant-stub>'
 | project Timestamp, ActionType, AccountUpn, RawEventData
 ```
 
@@ -108,7 +110,7 @@ CloudAppEvents
 // Purview Audit log
 SearchAuditLog
 | where TimeGenerated > ago(1h)
-| where UserId contains '6c442aee'
+| where UserId contains '<run_id>'
 ```
 
 ## `--wait-for-alerts <minutes>`

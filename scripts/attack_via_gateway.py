@@ -9,10 +9,12 @@ block on 400s. That's the only place where per-attack RAI verdicts live
 
 Each run gets a unique `run_id` (8-char hex) which is stamped into the
 chat-completions `user` field so Defender XDR alerts and Purview DSPM
-activity can be correlated back to a specific harness run via KQL:
+activity can be correlated back to a specific harness run via KQL.
+Pass `--tenant-stub <your-stub>` to override the default for your
+tenant; the resulting user field is `<base>-<run_id>@<tenant-stub>`:
 
     CloudAppEvents
-    | where AccountUpn endswith '<run_id>@mngenvmcap648165'
+    | where AccountUpn endswith '<run_id>@<your-tenant-stub>'
 
 Coverage matrix
 ---------------
@@ -255,8 +257,9 @@ def main() -> int:
     ap.add_argument("--api-version", default="2024-10-21")
     ap.add_argument("--end-user-base", default="aisec-attack-harness",
                     help="Base for the synthetic end-user; final user field is <base>-<run_id>@<tenant-stub>.")
-    ap.add_argument("--tenant-stub", default="mngenvmcap648165",
-                    help="Tenant stub appended after the run-id in the user field for Activity Explorer attribution.")
+    ap.add_argument("--tenant-stub", default="aisec-lab",
+                    help="Tenant stub appended after the run-id in the user field for Activity Explorer attribution. "
+                         "Override with your tenant's short-name (e.g. 'contoso') for accurate XDR/Purview correlation.")
     ap.add_argument("--sleep-between", type=float, default=0.5)
     ap.add_argument("--timeout", type=float, default=20.0)
     ap.add_argument("--output", default=None)
