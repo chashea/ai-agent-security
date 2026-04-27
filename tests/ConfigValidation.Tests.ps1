@@ -11,7 +11,7 @@ Describe 'Test-LabConfigValidity' {
         $config = [PSCustomObject]@{
             labName   = 'AI Agent Security'
             prefix    = 'AISec'
-            domain    = 'MngEnvMCAP648165.onmicrosoft.com'
+            domain    = 'contoso.onmicrosoft.com'
             workloads = [PSCustomObject]@{
                 conditionalAccess = [PSCustomObject]@{
                     enabled  = $true
@@ -34,7 +34,7 @@ Describe 'Test-LabConfigValidity' {
         $config = [PSCustomObject]@{
             labName   = 'AI Agent Security'
             prefix    = 'AISec'
-            domain    = 'MngEnvMCAP648165.onmicrosoft.com'
+            domain    = 'contoso.onmicrosoft.com'
             workloads = [PSCustomObject]@{
                 conditionalAccess = [PSCustomObject]@{
                     enabled = $false
@@ -48,7 +48,7 @@ Describe 'Test-LabConfigValidity' {
         $config = [PSCustomObject]@{
             labName   = 'AI Agent Security'
             prefix    = 'AISec'
-            domain    = 'MngEnvMCAP648165.onmicrosoft.com'
+            domain    = 'contoso.onmicrosoft.com'
             workloads = [PSCustomObject]@{
                 conditionalAccess = [PSCustomObject]@{
                     enabled = $true
@@ -63,7 +63,7 @@ Describe 'Test-LabConfigValidity' {
         $config = [PSCustomObject]@{
             labName   = 'AI Agent Security'
             prefix    = 'AISec'
-            domain    = 'MngEnvMCAP648165.onmicrosoft.com'
+            domain    = 'contoso.onmicrosoft.com'
             workloads = [PSCustomObject]@{
                 conditionalAccess = [PSCustomObject]@{
                     enabled  = $true
@@ -78,7 +78,7 @@ Describe 'Test-LabConfigValidity' {
         $config = [PSCustomObject]@{
             labName = 'AI Agent Security'
             prefix  = 'AISec'
-            domain  = 'MngEnvMCAP648165.onmicrosoft.com'
+            domain  = 'contoso.onmicrosoft.com'
         }
         Test-LabConfigValidity -Config $config -WarningVariable w 3>$null | Should -Be $false
     }
