@@ -34,8 +34,12 @@
     Skip connecting to Exchange Online, Microsoft Graph, and Azure (for testing).
 
 .PARAMETER TenantId
-    Microsoft Entra tenant ID. Defaults to environment variable PURVIEW_TENANT_ID.
-    Required unless -SkipAuth is specified.
+    Microsoft Entra tenant ID. Optional — if omitted, derived from
+    `config.domain` via the public OIDC discovery endpoint
+    (`https://login.microsoftonline.com/<domain>/v2.0/.well-known/openid-configuration`),
+    so the user only has to provide the tenant domain (prompted on first
+    run) and the Foundry subscription ID. Defaults to environment variable
+    PURVIEW_TENANT_ID. Pass explicitly to override the derived value.
 
 .PARAMETER Cloud
     Cloud environment to use (`commercial` or `gcc`). If omitted, uses config value.
@@ -223,7 +227,12 @@ try {
     # Connect to services
     if (-not $SkipAuth) {
         if ([string]::IsNullOrWhiteSpace($TenantId)) {
-            throw 'TenantId is required when authentication is enabled. Use -TenantId or set PURVIEW_TENANT_ID.'
+            if ([string]::IsNullOrWhiteSpace($Config.domain)) {
+                throw 'TenantId is required when authentication is enabled and config.domain is empty. Pass -TenantId or set PURVIEW_TENANT_ID.'
+            }
+            Write-LabLog -Message "TenantId not provided — resolving from domain '$($Config.domain)' via OIDC discovery." -Level Info
+            $TenantId = Resolve-LabTenantIdFromDomain -Domain $Config.domain
+            Write-LabLog -Message "Resolved TenantId: $TenantId" -Level Info
         }
 
         Write-LabStep -StepName 'Auth' -Description 'Connecting to cloud services'

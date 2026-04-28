@@ -136,3 +136,43 @@ Describe 'Test-LabManifestValidity' {
         Test-LabManifestValidity -Manifest $manifest -WarningVariable w 3>$null | Should -Be $false
     }
 }
+
+Describe 'Resolve-LabTenantIdFromDomain' {
+    It 'Parses tenant GUID from OIDC issuer' {
+        Mock -ModuleName Prerequisites Invoke-RestMethod {
+            return [PSCustomObject]@{
+                issuer = 'https://login.microsoftonline.com/abcd1234-5678-90ab-cdef-1234567890ab/v2.0'
+            }
+        }
+        $tenantId = Resolve-LabTenantIdFromDomain -Domain 'contoso.onmicrosoft.com'
+        $tenantId | Should -Be 'abcd1234-5678-90ab-cdef-1234567890ab'
+    }
+
+    It 'Returns lowercase tenant ID even when issuer is uppercase' {
+        Mock -ModuleName Prerequisites Invoke-RestMethod {
+            return [PSCustomObject]@{
+                issuer = 'https://login.microsoftonline.com/ABCD1234-5678-90AB-CDEF-1234567890AB/v2.0'
+            }
+        }
+        Resolve-LabTenantIdFromDomain -Domain 'contoso.onmicrosoft.com' |
+            Should -Be 'abcd1234-5678-90ab-cdef-1234567890ab'
+    }
+
+    It 'Throws on empty domain' {
+        { Resolve-LabTenantIdFromDomain -Domain '   ' } | Should -Throw '*Domain is required*'
+    }
+
+    It 'Throws when OIDC discovery returns no issuer' {
+        Mock -ModuleName Prerequisites Invoke-RestMethod {
+            return [PSCustomObject]@{ issuer = '' }
+        }
+        { Resolve-LabTenantIdFromDomain -Domain 'contoso.onmicrosoft.com' } |
+            Should -Throw '*returned no issuer field*'
+    }
+
+    It 'Throws when OIDC endpoint fails' {
+        Mock -ModuleName Prerequisites Invoke-RestMethod { throw 'connection refused' }
+        { Resolve-LabTenantIdFromDomain -Domain 'invalid.tld' } |
+            Should -Throw '*Failed to resolve tenant ID*'
+    }
+}

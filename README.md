@@ -30,12 +30,18 @@ cd ai-agent-security
 Sign in to Azure, then run the deployer:
 
 ```powershell
-az login --tenant <YOUR_TENANT_ID>
+az login
 az account set --subscription <SUBSCRIPTION_ID>
-Connect-AzAccount -Tenant <YOUR_TENANT_ID>
 
-./Deploy.ps1 -TenantId <YOUR_TENANT_ID>
+./Deploy.ps1
 ```
+
+`-TenantId` is optional — if omitted, the script derives it from the
+tenant domain you enter at the prompt via the public OIDC discovery
+endpoint (`login.microsoftonline.com/<domain>/v2.0/.well-known/openid-configuration`).
+You only have to provide the tenant **domain** and the **subscription
+ID** at the prompts; the tenant GUID is resolved automatically. Pass
+`-TenantId <guid>` to override.
 
 On the first run you will be prompted for:
 
@@ -178,7 +184,8 @@ cd ai-agent-security
 
 # First run: prompts for tenant domain / subscription / publisher UPN /
 # create-test-users, then writes the answers back to config.json.
-./Deploy.ps1 -TenantId <YOUR_TENANT_ID>
+# Tenant ID is derived from the entered domain — no -TenantId needed.
+./Deploy.ps1
 
 # Subsequent runs: silent (config.json already filled in).
 ./Deploy.ps1

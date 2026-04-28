@@ -227,6 +227,55 @@ function Connect-LabServices {
     }
 }
 
+function Resolve-LabTenantIdFromDomain {
+    <#
+    .SYNOPSIS
+        Derive the Microsoft Entra tenant ID for a verified domain via the
+        public OIDC discovery endpoint. No authentication required.
+
+    .DESCRIPTION
+        Queries `https://login.microsoftonline.com/<domain>/v2.0/.well-known/openid-configuration`
+        and parses the tenant GUID out of the `issuer` claim
+        (`https://login.microsoftonline.com/<TENANT_ID>/v2.0`). This lets the
+        deploy fetch the tenant ID without the user having to pass it on the
+        CLI — they only need to provide the tenant domain (already prompted
+        during first-run setup) and the subscription ID.
+
+    .PARAMETER Domain
+        The Entra tenant's verified domain (e.g., `contoso.onmicrosoft.com`).
+    #>
+    [CmdletBinding()]
+    [OutputType([string])]
+    param(
+        [Parameter(Mandatory)]
+        [string]$Domain
+    )
+
+    $trimmed = $Domain.Trim()
+    if ([string]::IsNullOrWhiteSpace($trimmed)) {
+        throw 'Domain is required to resolve tenant ID.'
+    }
+
+    $url = "https://login.microsoftonline.com/$trimmed/v2.0/.well-known/openid-configuration"
+    try {
+        $response = Invoke-RestMethod -Uri $url -Method GET -TimeoutSec 15 -ErrorAction Stop
+    }
+    catch {
+        throw "Failed to resolve tenant ID for domain '$trimmed' via OIDC discovery ($url): $($_.Exception.Message)"
+    }
+
+    $issuer = [string]$response.issuer
+    if ([string]::IsNullOrWhiteSpace($issuer)) {
+        throw "OIDC discovery for domain '$trimmed' returned no issuer field."
+    }
+
+    if ($issuer -match '/([0-9a-fA-F-]{36})/') {
+        return $Matches[1].ToLowerInvariant()
+    }
+
+    throw "Could not parse tenant ID from issuer '$issuer'."
+}
+
 function Resolve-LabTenantDomain {
     [CmdletBinding()]
     [OutputType([string])]
@@ -655,6 +704,7 @@ Export-ModuleMember -Function @(
     'Test-LabPrerequisites'
     'Connect-LabServices'
     'Resolve-LabTenantDomain'
+    'Resolve-LabTenantIdFromDomain'
     'Get-LabUserByIdentity'
     'Disconnect-LabServices'
     'Import-LabConfig'
