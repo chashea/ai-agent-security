@@ -61,7 +61,6 @@
 [CmdletBinding(SupportsShouldProcess)]
 param(
     [Parameter()]
-    [ValidateScript({ Test-Path $_ -PathType Leaf })]
     [string]$ConfigPath = (Join-Path $PSScriptRoot 'config.json'),
 
     [Parameter()]
@@ -110,6 +109,11 @@ foreach ($mod in (Get-ChildItem -Path (Join-Path $PSScriptRoot 'modules') -Filte
     Import-Module $mod.FullName -Force
 }
 
+# Bootstrap: resolve config placeholders on first-time setup (interactive only)
+if (-not $SkipAuth) {
+    Resolve-LabConfigPlaceholders -ConfigPath $ConfigPath
+}
+
 try {
     # Initialize logging
     Initialize-LabLogging -Prefix 'AIAgentSec'
@@ -122,6 +126,37 @@ try {
         Write-LabLog -Message 'Configuration has validation warnings. Review above messages.' -Level Warning
     }
     $resolvedCloud = Resolve-LabCloud -Cloud $Cloud -Config $Config
+
+    # Prompt: create new test users? (interactive only, skipped when CLI flag provided)
+    $testUsersConfigured = $Config.workloads.PSObject.Properties['testUsers'] -and $Config.workloads.testUsers -and
+                           $Config.workloads.testUsers.PSObject.Properties['enabled'] -and $Config.workloads.testUsers.enabled
+    if (-not $SkipAuth -and -not $SkipTestUsers -and [string]::IsNullOrWhiteSpace($TestUsersMode) -and
+        $testUsersConfigured -and -not [Console]::IsInputRedirected -and $env:CI -ne 'true') {
+        $chosenMode = Request-CreateTestUsersChoice
+        if ($Config.workloads.testUsers.PSObject.Properties['mode']) {
+            $Config.workloads.testUsers.mode = $chosenMode
+        } else {
+            $Config.workloads.testUsers | Add-Member -NotePropertyName 'mode' -NotePropertyValue $chosenMode
+        }
+        if ($chosenMode -eq 'create') {
+            $newUsers = @(
+                [PSCustomObject]@{ displayName = 'AISec Finance Tester'; mailNickname = 'aisec-finance'; department = 'Finance';   jobTitle = 'Test User'; usageLocation = 'US' }
+                [PSCustomObject]@{ displayName = 'AISec IT Tester';      mailNickname = 'aisec-it';      department = 'IT';        jobTitle = 'Test User'; usageLocation = 'US' }
+                [PSCustomObject]@{ displayName = 'AISec Sales Tester';   mailNickname = 'aisec-sales';   department = 'Sales';     jobTitle = 'Test User'; usageLocation = 'US' }
+            )
+            $Config.workloads.testUsers.users = $newUsers
+            foreach ($grp in @($Config.workloads.testUsers.groups)) {
+                switch ([string]$grp.displayName) {
+                    'AISec-Finance-Team' { $grp.members = @('aisec-finance') }
+                    'AISec-IT-Team'      { $grp.members = @('aisec-it') }
+                    'AISec-Sales-Team'   { $grp.members = @('aisec-sales') }
+                }
+            }
+        }
+        # Persist the mode (and any user-roster changes) back to config file
+        $Config | ConvertTo-Json -Depth 20 | Set-Content -Path $ConfigPath -Encoding UTF8
+        Write-LabLog -Message "Test users mode set to '$chosenMode' and saved to $ConfigPath" -Level Info
+    }
 
     # Apply SkipTestUsers override
     if ($SkipTestUsers -and $Config.workloads.PSObject.Properties['testUsers'] -and $Config.workloads.testUsers) {

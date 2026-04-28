@@ -18,37 +18,45 @@ Deploy AI agents from Azure AI Foundry and automatically wrap them with:
 
 ## Getting started
 
-Clone the repo, copy the sample config, and fill in your tenant-specific
-values. `config.json` is git-ignored so your real values stay local.
+Clone the repo and run the deploy script. On the first run it copies
+`config.sample.json` to `config.json` and prompts you for the four
+tenant-specific values — no manual file editing required.
 
 ```bash
 git clone https://github.com/chashea/ai-agent-security.git
 cd ai-agent-security
-cp config.sample.json config.json
 ```
 
-Edit `config.json` and replace every placeholder:
-
-| Placeholder         | What to put                                                 |
-|---------------------|-------------------------------------------------------------|
-| `<SUBSCRIPTION_ID>` | Azure subscription ID (`az account show --query id -o tsv`) |
-| `<TENANT_DOMAIN>`   | Your Entra tenant's primary domain, e.g. `contoso.onmicrosoft.com` |
-| `<PUBLISHER_UPN>`   | UPN used for APIM publisher contact + agent identity        |
-| `<USER_UPN>`        | UPN(s) added to the test groups (Finance/IT/Sales)          |
-
-Then sign in and deploy:
+Sign in to Azure, then run the deployer:
 
 ```powershell
 az login --tenant <YOUR_TENANT_ID>
 az account set --subscription <SUBSCRIPTION_ID>
 Connect-AzAccount -Tenant <YOUR_TENANT_ID>
 
-./Deploy.ps1 -ConfigPath config.json
+./Deploy.ps1 -TenantId <YOUR_TENANT_ID>
 ```
 
+On the first run you will be prompted for:
+
+| Prompt | Example value |
+|--------|---------------|
+| Tenant domain | `contoso.onmicrosoft.com` |
+| Azure subscription ID | `xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx` |
+| Publisher / admin UPN | `admin@contoso.onmicrosoft.com` |
+| Create new test users? `[y/N]` | `N` = use existing users, `Y` = create 3 lab users |
+
+Answers are saved back to `config.json` so subsequent runs skip the prompts.
+`config.json` is git-ignored — your tenant values stay local.
+
+**Test users prompt:**
+- **N (default)** — the three existing Entra users specified by the publisher UPN are
+  used to populate the Finance, IT, and Sales test groups.
+- **Y** — three new accounts (`aisec-finance`, `aisec-it`, `aisec-sales`) are created
+  and licensed, then added to the respective groups.
+
 `config.json` carries defaults for agent rosters, knowledge bases,
-evaluations, and guardrail policies — you only need to edit the
-tenant-specific fields above to get a working deploy.
+evaluations, and guardrail policies — only the prompts above need answers.
 
 ## Deployment modes
 
