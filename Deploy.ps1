@@ -227,12 +227,36 @@ try {
     # Connect to services
     if (-not $SkipAuth) {
         if ([string]::IsNullOrWhiteSpace($TenantId)) {
-            if ([string]::IsNullOrWhiteSpace($Config.domain)) {
-                throw 'TenantId is required when authentication is enabled and config.domain is empty. Pass -TenantId or set PURVIEW_TENANT_ID.'
+            # Resolution order:
+            #   1. Active `az login` tenant (most recent explicit user choice)
+            #   2. Active Az PowerShell context tenant
+            #   3. OIDC discovery from $Config.domain (no auth required)
+            $azCliTenant = $null
+            try {
+                $azCliTenant = (az account show --query tenantId -o tsv 2>$null).Trim()
             }
-            Write-LabLog -Message "TenantId not provided — resolving from domain '$($Config.domain)' via OIDC discovery." -Level Info
-            $TenantId = Resolve-LabTenantIdFromDomain -Domain $Config.domain
-            Write-LabLog -Message "Resolved TenantId: $TenantId" -Level Info
+            catch { $azCliTenant = $null }
+
+            if (-not [string]::IsNullOrWhiteSpace($azCliTenant)) {
+                $TenantId = $azCliTenant
+                Write-LabLog -Message "TenantId not provided — using active 'az login' tenant: $TenantId" -Level Info
+            }
+            else {
+                $azPsContext = $null
+                try { $azPsContext = Get-AzContext -ErrorAction SilentlyContinue } catch { $azPsContext = $null }
+                if ($azPsContext -and $azPsContext.Tenant -and -not [string]::IsNullOrWhiteSpace($azPsContext.Tenant.Id)) {
+                    $TenantId = [string]$azPsContext.Tenant.Id
+                    Write-LabLog -Message "TenantId not provided — using active Az PowerShell context tenant: $TenantId" -Level Info
+                }
+                elseif (-not [string]::IsNullOrWhiteSpace($Config.domain)) {
+                    Write-LabLog -Message "TenantId not provided — resolving from domain '$($Config.domain)' via OIDC discovery." -Level Info
+                    $TenantId = Resolve-LabTenantIdFromDomain -Domain $Config.domain
+                    Write-LabLog -Message "Resolved TenantId: $TenantId" -Level Info
+                }
+                else {
+                    throw 'TenantId is required when authentication is enabled. Run `az login` first, pass -TenantId, or set PURVIEW_TENANT_ID.'
+                }
+            }
         }
 
         Write-LabStep -StepName 'Auth' -Description 'Connecting to cloud services'
