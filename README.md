@@ -176,12 +176,15 @@ After every clean deploy, work through
 git clone https://github.com/chashea/ai-agent-security.git
 cd ai-agent-security
 
-# Edit config.json with your tenant domain, subscription, and agent definitions
-# Then deploy:
-./Deploy.ps1 -ConfigPath config.json
+# First run: prompts for tenant domain / subscription / publisher UPN /
+# create-test-users, then writes the answers back to config.json.
+./Deploy.ps1 -TenantId <YOUR_TENANT_ID>
+
+# Subsequent runs: silent (config.json already filled in).
+./Deploy.ps1
 
 # Teardown:
-./Remove.ps1 -ConfigPath config.json
+./Remove.ps1
 ```
 
 ## Configuration

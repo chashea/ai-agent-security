@@ -19,9 +19,14 @@ Single config file (`config.json`), modular by workload, deploy + teardown symme
 
 ## Tenant
 
-Target tenant is configured per-user in `config.json` (copy from
-`config.sample.json`); CI and tests use a fixture domain. Helper scripts
-that need a tenant ID read from `-TenantId` or `$env:AZURE_TENANT_ID`.
+Target tenant is configured per-user in `config.json`. On the first
+`./Deploy.ps1` run, the script auto-bootstraps `config.json` from
+`config.sample.json` (if absent) and prompts for `<TENANT_DOMAIN>`,
+`<SUBSCRIPTION_ID>`, `<PUBLISHER_UPN>`, and "Create new test users? [y/N]"
+(see `Resolve-LabConfigPlaceholders` and `Request-CreateTestUsersChoice`
+in `modules/Interactive.psm1`). Answers are persisted so subsequent
+runs are silent. CI and tests use a fixture domain. Helper scripts that
+need a tenant ID read from `-TenantId` or `$env:AZURE_TENANT_ID`.
 
 ## Commands
 
