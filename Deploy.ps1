@@ -288,10 +288,13 @@ try {
                 $connectParams['GraphScopes'] = @($defaultScopes + $grantScopes) | Sort-Object -Unique
             }
         }
-        # Device code auth works in both TTY and non-TTY pwsh. Connect-MgGraph
-        # otherwise tries a broker/browser flow that blocks when stdin is not a
-        # terminal (e.g. background jobs, CI, claude-code pipes).
-        $connectParams['UseDeviceCode'] = $true
+        # Browser flow when running interactively (one click vs. type-the-code).
+        # Device code only when stdin is redirected (background jobs, CI,
+        # claude-code pipes) — Connect-MgGraph's broker/browser path hangs
+        # there because it can't pop a window.
+        if ([Console]::IsInputRedirected -or $env:CI -eq 'true') {
+            $connectParams['UseDeviceCode'] = $true
+        }
         Connect-LabServices @connectParams
         $services = [System.Collections.Generic.List[string]]::new()
         if ($needsExchange) { $services.Add('Exchange Online') }
