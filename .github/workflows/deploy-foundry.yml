@@ -1,32 +1,39 @@
-name: Deploy Foundry (OIDC)
+name: Deploy Foundry
 
-# Manual-only workflow that runs Deploy.ps1 -FoundryOnly against a target
-# Azure subscription using OIDC federated credentials. No stored secrets.
+# Manual workflow that runs Deploy.ps1 -FoundryOnly against a target tenant.
+# Self-contained: tenant_id + subscription_id are dispatch inputs, sign-in is
+# interactive via az device code (CLI + Az PowerShell, two prompts per run).
+# No service principal, no federated credentials, no stored secrets, no
+# repo/environment variables to set up. Click "Run workflow", paste both
+# device codes, deploy proceeds.
 #
-# Required repo configuration (Settings → Secrets and variables → Actions):
-#   Variables:
-#     AZURE_CLIENT_ID         App registration / managed identity client ID
-#     AZURE_TENANT_ID         Entra tenant ID
-#     AZURE_SUBSCRIPTION_ID   Target subscription ID
+# Required Azure permissions for the signed-in user (per Deploy.ps1
+# -FoundryOnly needs):
+#   - Contributor                     (RG, Foundry account, Bicep deploys)
+#   - User Access Administrator       (RBAC grants for the agent MI)
+#   - Cognitive Services Contributor  (Foundry account + project)
+#   - Search Service Contributor      (Search index create/update)
+#   - Search Index Data Contributor   (doc upload)
+#   - Owner on Foundry account or sub (flip disableLocalAuth=false; MCAPS-
+#     governed tenants need a policy exemption created out-of-band first —
+#     see README.md → MCAPS-governed tenants)
 #
-# The federated identity must trust this repo + workflow. Required Azure roles
-# on the target subscription/RG:
-#   - Contributor              (RG, Foundry account, Bicep deploys)
-#   - User Access Administrator (RBAC grants for the agent MI)
-#   - Cognitive Services Contributor (Foundry account + project)
-#   - Search Service Contributor + Search Index Data Contributor
-#   - Owner on the Foundry account *or* the equivalent permissions to flip
-#     disableLocalAuth=false (MCAPS-governed tenants need a policy exemption
-#     created out-of-band first — see README.md → MCAPS-governed tenants).
-#
-# Limitations vs. local deploy:
-#   - Teams app catalog publish is gracefully skipped (needs interactive
-#     Graph admin consent, can't run headless).
+# Limitations:
+#   - Teams app catalog publish is gracefully skipped on tenants where the
+#     signed-in user lacks tenant-level app upload rights (common on MCAPS).
 #   - Conditional Access / MDCA / test users / EXO labels are not run.
 
 on:
   workflow_dispatch:
     inputs:
+      tenant_id:
+        description: "Entra tenant ID (GUID)"
+        required: true
+        type: string
+      subscription_id:
+        description: "Target Azure subscription ID (GUID)"
+        required: true
+        type: string
       tenant_domain:
         description: "Tenant primary domain (e.g. contoso.onmicrosoft.com)"
         required: true
@@ -52,7 +59,6 @@ on:
         type: boolean
 
 permissions:
-  id-token: write
   contents: read
 
 concurrency:
@@ -62,17 +68,8 @@ concurrency:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    environment: foundry
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
-
-      - name: Azure login (OIDC)
-        uses: Azure/login@1384c340ab2dda50fed2bee3041d1d87018aa5e8  # v2
-        with:
-          client-id: ${{ vars.AZURE_CLIENT_ID }}
-          tenant-id: ${{ vars.AZURE_TENANT_ID }}
-          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
-          enable-AzPSSession: true
 
       - name: Install Bicep
         shell: pwsh
@@ -91,6 +88,7 @@ jobs:
           # need to be present even when -FoundryOnly + -SkipAuth bypasses
           # the actual EXO/Graph connect.
           $modules = @(
+            'Az.Accounts',
             'ExchangeOnlineManagement',
             'Microsoft.Graph.Authentication',
             'Microsoft.Graph.Users',
@@ -119,6 +117,28 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r scripts/requirements.txt
 
+      - name: Az CLI device-code login (1 of 2)
+        env:
+          TENANT_ID: ${{ inputs.tenant_id }}
+          SUB_ID: ${{ inputs.subscription_id }}
+        run: |
+          set -euo pipefail
+          echo "::warning::Device code #1 (az CLI) below — open URL, paste code, sign in within ~15 min."
+          az login --use-device-code --tenant "$TENANT_ID" --only-show-errors
+          az account set --subscription "$SUB_ID"
+          echo "az CLI signed in as: $(az account show --query user.name -o tsv)"
+
+      - name: Az PowerShell device-code login (2 of 2)
+        shell: pwsh
+        env:
+          TENANT_ID: ${{ inputs.tenant_id }}
+          SUB_ID: ${{ inputs.subscription_id }}
+        run: |
+          Write-Host "::warning::Device code #2 (Az PowerShell) below — separate context from az CLI, sign in again."
+          Connect-AzAccount -Tenant $env:TENANT_ID -Subscription $env:SUB_ID -UseDeviceAuthentication | Out-Null
+          $ctx = Get-AzContext
+          Write-Host ("Az PS signed in as: {0} / sub: {1}" -f $ctx.Account.Id, $ctx.Subscription.Name)
+
       - name: Build config.json from sample
         shell: pwsh
         env:
@@ -126,7 +146,7 @@ jobs:
           INPUT_PUBLISHER_UPN: ${{ inputs.publisher_upn }}
           INPUT_PREFIX: ${{ inputs.prefix }}
           INPUT_LOCATION: ${{ inputs.location }}
-          INPUT_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          INPUT_SUBSCRIPTION_ID: ${{ inputs.subscription_id }}
         run: |
           $raw = Get-Content config.sample.json -Raw
           $raw = $raw.Replace('<SUBSCRIPTION_ID>',  $env:INPUT_SUBSCRIPTION_ID)
@@ -154,13 +174,15 @@ jobs:
       - name: Deploy Foundry
         shell: pwsh
         env:
-          AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
-          AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          AZURE_TENANT_ID: ${{ inputs.tenant_id }}
+          AZURE_SUBSCRIPTION_ID: ${{ inputs.subscription_id }}
           DRY_RUN: ${{ inputs.dry_run }}
         run: |
-          # azure/login@v2 with enable-AzPSSession populates the Az PowerShell
-          # context for this runner. Deploy.ps1 -SkipAuth then reuses the
-          # already-logged-in `az` and Az contexts.
+          # Deploy.ps1 -SkipAuth reuses the already-logged-in `az` and Az
+          # contexts from the device-code logins above. Foundry.psm1 will
+          # initiate its own Connect-MgGraph -UseDeviceCode for Teams app
+          # catalog publishing if needed — that's a third device code prompt,
+          # gracefully skipped on tenants without app upload rights.
           $params = @{
             ConfigPath  = 'config.json'
             FoundryOnly = $true
