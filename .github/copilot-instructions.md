@@ -14,22 +14,28 @@ constraint. Everything below exists to keep the deploy reproducible.
 
 The deploy stands up:
 
-- 5 Foundry agents (HR-Helpdesk, Finance-Analyst, IT-Support, Sales-Research, Security-Triage)
+- 5 user-facing Foundry agents (HR-Helpdesk, Finance-Analyst, IT-Support, Sales-Research, Security-Triage) plus a Concierge routing orchestrator (`connected_agent` tools) that fans out to the other five
 - A shared Azure AI Search index (`aisec-compliance-index`, hybrid +
   semantic, `agent_scope` filter) populated from `scripts/demo_docs/`
 - Per-agent file_search vector stores
-- Sensitivity labels with AI Search MI enforcement
-- Custom RAI guardrails + jailbreak / PII blocklists
+- APIM-based AI Gateway in front of the Foundry AOAI endpoint (TPM
+  limits, monthly quotas, App Insights token metrics, MI auth)
+- Custom RAI guardrails + jailbreak / PII blocklists, plus optional
+  Azure Policy guardrail initiatives (Audit / Deny enforcement of the
+  RAI policy stack across the subscription)
 - Conditional Access (report-only), Defender for Cloud Apps session
   policies, Defender for Cloud posture
 - Post-deploy evaluations + AI red teaming (Steps 7 & 8)
+- Adversarial smoke harness through the AI Gateway with full
+  RAI-filter-verdict capture, six-grade outcome model, coverage matrix,
+  and `run_id` correlation for Defender XDR / Purview DSPM
 
 ## Stack
 
 - **PowerShell 7+** orchestration in `modules/*.psm1`
 - **Python 3.12** for Foundry SDK work in `scripts/*.py` (system `python3`
   is 3.9, **always** invoke as `python3.12` explicitly)
-- **Bicep** in `infra/` for eval infra, Bot Services, Defender posture
+- **Bicep** in `infra/` for eval infra, Bot Services, Defender posture, AI Gateway, RAI guardrails, and Foundry guardrail policy initiatives
 - **ARM REST** (PowerShell) for Foundry account / project — Bicep's
   `accounts/projects` type 500s on MCAPS tenants
 
@@ -80,9 +86,10 @@ removal step.
 ./Deploy.ps1 -ConfigPath config.json
 ./Remove.ps1 -ConfigPath config.json
 
-# Foundry-only / labels-only
+# Foundry-only / identity+CA+MDCA only / AI-Gateway-only
 ./Deploy.ps1 -ConfigPath config.json -FoundryOnly
 ./Deploy.ps1 -ConfigPath config.json -SkipFoundry
+./Deploy.ps1 -ConfigPath config.json -AIGatewayOnly
 
 # Dry run
 ./Deploy.ps1 -ConfigPath config.json -SkipAuth -WhatIf
@@ -102,6 +109,11 @@ az bicep build --file infra/bot-services.bicep
 az bicep build --file infra/bot-per-agent.bicep
 az bicep build --file infra/defender-posture.bicep
 az bicep build --file infra/guardrails.bicep
+az bicep build --file infra/ai-gateway.bicep
+az bicep build --file infra/foundry-builtin-policies.bicep
+az bicep build --file infra/foundry-guardrail-policies.bicep
+az bicep build --file infra/foundry-guardrail-per-risk.bicep
+az bicep build --file infra/foundry-guardrail-violation-fixtures.bicep
 ```
 
 CI (`.github/workflows/validate.yml`) runs six jobs: `lint`, `test`,

@@ -7,7 +7,7 @@ by MCAPS governance policies that cannot be bypassed automatically. Work
 through this checklist after every clean deploy; most items are one-time
 per lab tenant.
 
-## Status at a glance (v0.9.0)
+## Status at a glance (current as of v0.20.0)
 
 | # | Item | Status |
 |---|---|---|
@@ -339,8 +339,8 @@ lab's knowledge stack actually shows up:
 |---|---|---|
 | **Agents → `<agent>` → Tools → file_search** | 4 vector stores named `AISec-<agent>-knowledge` (HR-Helpdesk, Finance-Analyst, IT-Support, Sales-Research), each with the demo doc corpus from `scripts/demo_docs/<agent_scope>/`. Security-Triage declares no `file_search` tool. | `scripts/foundry_knowledge.py upload` (Step 3 of `Deploy-Foundry`) |
 | **Knowledge → Indexes / Vector stores** | Same 4 vector stores surfaced as `ManagedAzureSearch` indexes (the data-plane `/indexes` endpoint backs this view) | Same as above |
-| **Connected resources → Azure AI Search** | One search service connection named `AISec-ai-search` pointing at `aisec-search-eastus` | `scripts/foundry_tools.py setup-connections` (Step 2) |
-| **Azure portal → AI Search → `aisec-search-eastus` → Indexes** | One hybrid + semantic index named `aisec-compliance-index` containing 12 docs (3 per agent_scope × 4 agent_scopes) tagged with the `agent_scope` filterable field | `scripts/foundry_search_index.py populate` (Step 3b) |
+| **Connected resources → Azure AI Search** | One search service connection named `AISec-ai-search` pointing at `aisec-search` | `scripts/foundry_tools.py setup-connections` (Step 2) |
+| **Azure portal → AI Search → `aisec-search` → Indexes** | One hybrid + semantic index named `aisec-compliance-index` containing 12 docs (3 per agent_scope × 4 agent_scopes) tagged with the `agent_scope` filterable field | `scripts/foundry_search_index.py populate` (Step 3b) |
 | **Knowledge → Foundry IQ Knowledge bases** | **Empty by design.** Foundry IQ is a separate, newer (Ignite 2025) agentic-retrieval abstraction that wraps Azure AI Search + connections + reasoning. It is currently portal-only — there is no public REST API to create a Foundry IQ KB programmatically on the Standard Agent Setup tier. | Optional manual step (see below) |
 
 ### Optional: create a Foundry IQ Knowledge base manually
@@ -391,13 +391,13 @@ curl -s -H "Authorization: Bearer $TOKEN" \
 # Azure AI Search index exists, AAD auth works, and docs are populated per agent_scope
 SEARCH_TOKEN=$(az account get-access-token --resource https://search.azure.com --query accessToken -o tsv)
 curl -s -H "Authorization: Bearer $SEARCH_TOKEN" \
-  "https://aisec-search-eastus.search.windows.net/indexes/aisec-compliance-index/docs/search?api-version=2024-07-01" \
+  "https://aisec-search.search.windows.net/indexes/aisec-compliance-index/docs/search?api-version=2024-07-01" \
   -H "Content-Type: application/json" \
   -d '{"search":"*","count":true,"facets":["agent_scope"],"top":0}' | jq '.["@odata.count"], .["@search.facets"]'
 
 # Sample semantic-ranked query against a single agent_scope (HR)
 curl -s -H "Authorization: Bearer $SEARCH_TOKEN" \
-  "https://aisec-search-eastus.search.windows.net/indexes/aisec-compliance-index/docs/search?api-version=2024-07-01" \
+  "https://aisec-search.search.windows.net/indexes/aisec-compliance-index/docs/search?api-version=2024-07-01" \
   -H "Content-Type: application/json" \
   -d '{"search":"how do I request PTO","queryType":"semantic","semanticConfiguration":"aisec-semantic","filter":"agent_scope eq '\''HR-Helpdesk'\''","top":3,"select":"doc_id,title"}'
 

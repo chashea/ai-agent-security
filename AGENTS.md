@@ -4,7 +4,7 @@ AI agent guidance for working in this repository.
 
 ## Project Overview
 
-Standalone AI agent security tool. Deploys Azure AI Foundry agents and wraps them with sensitivity labels (with AI Search enforcement), identity governance (managed identity RBAC, conditional access), and Microsoft Defender controls (MDCA session policies, Defender for Cloud posture).
+Standalone AI agent security tool. Deploys Azure AI Foundry agents and wraps them with managed-identity RBAC, an APIM-based AI Gateway (TPM limits + token metrics), identity governance (Conditional Access), and Microsoft Defender controls (MDCA session policies, Defender for Cloud posture).
 
 Single config file (`config.json`), modular by workload, deploy + teardown symmetry.
 
@@ -23,11 +23,14 @@ Single config file (`config.json`), modular by workload, deploy + teardown symme
 # Full deploy
 ./Deploy.ps1 -ConfigPath config.json
 
-# Security-only (skip Foundry)
+# Identity / CA / MDCA only (skip Foundry + AI Gateway)
 ./Deploy.ps1 -ConfigPath config.json -SkipFoundry
 
 # Foundry-only
 ./Deploy.ps1 -ConfigPath config.json -FoundryOnly
+
+# AI Gateway-only (assumes Foundry exists)
+./Deploy.ps1 -ConfigPath config.json -AIGatewayOnly
 
 # Dry run (no cloud connection)
 ./Deploy.ps1 -ConfigPath config.json -SkipAuth -WhatIf
@@ -53,6 +56,12 @@ az bicep build --file infra/foundry-eval-infra.bicep
 az bicep build --file infra/bot-services.bicep
 az bicep build --file infra/bot-per-agent.bicep
 az bicep build --file infra/defender-posture.bicep
+az bicep build --file infra/guardrails.bicep
+az bicep build --file infra/ai-gateway.bicep
+az bicep build --file infra/foundry-builtin-policies.bicep
+az bicep build --file infra/foundry-guardrail-policies.bicep
+az bicep build --file infra/foundry-guardrail-per-risk.bicep
+az bicep build --file infra/foundry-guardrail-violation-fixtures.bicep
 ```
 
 ## Architecture
@@ -72,7 +81,11 @@ The Foundry workload uses three layers:
   post-deploy evaluations pipeline, AI red teaming.
 - **Bicep** (`infra/`) — Eval infrastructure (`foundry-eval-infra.bicep`:
   AI Search, App Insights, Log Analytics), Bot Services (`bot-services.bicep`,
-  `bot-per-agent.bicep`), and Defender for Cloud posture (`defender-posture.bicep`).
+  `bot-per-agent.bicep`), Defender for Cloud posture (`defender-posture.bicep`),
+  Foundry RAI guardrails (`guardrails.bicep`), APIM-based AI Gateway
+  (`ai-gateway.bicep`), and Azure Policy guardrail initiatives
+  (`foundry-builtin-policies.bicep`, `foundry-guardrail-policies.bicep`,
+  `foundry-guardrail-per-risk.bicep`, `foundry-guardrail-violation-fixtures.bicep`).
 
 Foundry core resources (account/model/project) are NOT in Bicep — the project
 RP was flaky on MCAPS-governed tenants, so the per-resource retry loop in

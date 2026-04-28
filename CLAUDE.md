@@ -4,9 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Standalone AI agent security tool. Deploys Azure AI Foundry agents and wraps them with sensitivity labels (with AI Search enforcement), Conditional Access, and Defender for Cloud Apps controls.
+Standalone AI agent security tool. Deploys Azure AI Foundry agents and wraps them with managed-identity RBAC, an APIM-based AI Gateway (TPM limits + token metrics), Conditional Access, and Defender for Cloud Apps controls.
 
-Single config file (`config.json`), modular by workload, deploy + teardown symmetry. Supports `-SkipFoundry` (labeling/identity only) and `-FoundryOnly` (Foundry only) modes.
+Single config file (`config.json`), modular by workload, deploy + teardown symmetry. Supports `-SkipFoundry` (identity/CA/MDCA only), `-FoundryOnly` (Foundry only), and `-AIGatewayOnly` (APIM gateway only) modes.
 
 ## Stack
 
@@ -29,11 +29,14 @@ that need a tenant ID read from `-TenantId` or `$env:AZURE_TENANT_ID`.
 # Full deploy
 ./Deploy.ps1 -ConfigPath config.json
 
-# Labeling + identity only (skip Foundry)
+# Identity / CA / MDCA only (skip Foundry + AI Gateway)
 ./Deploy.ps1 -ConfigPath config.json -SkipFoundry
 
 # Foundry-only
 ./Deploy.ps1 -ConfigPath config.json -FoundryOnly
+
+# AI Gateway-only (assumes Foundry exists)
+./Deploy.ps1 -ConfigPath config.json -AIGatewayOnly
 
 # Dry run (no cloud connection)
 ./Deploy.ps1 -ConfigPath config.json -SkipAuth -WhatIf
@@ -74,6 +77,11 @@ az bicep build --file infra/bot-services.bicep
 az bicep build --file infra/bot-per-agent.bicep
 az bicep build --file infra/defender-posture.bicep
 az bicep build --file infra/guardrails.bicep
+az bicep build --file infra/ai-gateway.bicep
+az bicep build --file infra/foundry-builtin-policies.bicep
+az bicep build --file infra/foundry-guardrail-policies.bicep
+az bicep build --file infra/foundry-guardrail-per-risk.bicep
+az bicep build --file infra/foundry-guardrail-violation-fixtures.bicep
 
 # Deploy + fire adversarial traffic at end to light up detections
 ./Deploy.ps1 -ConfigPath config.json -AdversarialTraffic
@@ -197,7 +205,7 @@ Exceptions: `Prerequisites.psm1`, `Logging.psm1`, `Interactive.psm1`, and `Found
 - **Post-deploy validation** (Deploy.ps1): Retries 6 times with 5-second delays to handle Microsoft Graph eventual consistency lag.
 - **Long-running operations**: Foundry uses `Wait-ArmAsyncOperation` in FoundryInfra.psm1.
 - **PowerShell-to-Python interface**: `Invoke-FoundryPython` helper writes JSON config to a temp file, invokes `python3.12 scripts/<script>.py --action <verb> --config <path>`, captures JSON manifest from stdout. Python scripts invoked by the orchestrator: `foundry_agents.py` (agent CRUD), `foundry_tools.py` (connections + tool definitions), `foundry_knowledge.py` (vector stores + doc upload), `foundry_search_index.py` (Azure AI Search index lifecycle + doc upload with embeddings), `foundry_evals.py` (evaluations pipeline), `foundry_redteam.py` (AI Red Teaming). Standalone CLI scripts (not invoked by Deploy.ps1): `demo_security_triage.py` (Defender alerts → Triage agent), `fetch_defender_alerts.py` (Graph security alert pull — also importable), `attack_agents.py` (adversarial traffic catalog, opt-in via `-AdversarialTraffic`), `trend_redteam.py` (manifest-diff ASR regressions + HTML report). API versions are passed from PowerShell (single source of truth).
-- **Agent tools**: Each agent gets tools defined in `config.json` under `agents[].tools[]`. Tool definitions are built by `foundry_tools.py`, injecting runtime values (vector store IDs, connection IDs) from earlier deployment steps. Currently supports: code_interpreter, file_search, azure_ai_search, bing_grounding, openapi, azure_function, function, mcp, sharepoint_grounding, a2a, image_generation.
+- **Agent tools**: Each agent gets tools defined in `config.json` under `agents[].tools[]`. Tool definitions are built by `foundry_tools.py`, injecting runtime values (vector store IDs, connection IDs) from earlier deployment steps. Currently supports: code_interpreter, file_search, azure_ai_search, bing_grounding, openapi, azure_function, function, mcp, sharepoint_grounding, a2a, image_generation, connected_agent (used by the Concierge orchestrator).
 - **Security-Triage demo**: `scripts/demo_security_triage.py` pulls recent Defender XDR alerts via Microsoft Graph (`SecurityAlert.Read.All` + `SecurityIncident.Read.All`), ranks top-N by severity, and pipes each one through the deployed Security-Triage Foundry agent using the thread/message/run REST pattern shared with `foundry_redteam.py` (`_build_agent_callback` at `scripts/foundry_redteam.py:106-144`). Writes `logs/security-triage-demo-<UTC>.json` with `{alert, run_status, duration_ms, assistant_response}` per alert. Reads the agent id from the latest `manifests/*.json`. Requires `az login` against the target sub.
 - **Red-team trend HTML**: `scripts/trend_redteam.py --html <path>` renders a standalone HTML report (per-agent ASR table, evaluator metrics, regression highlighting). Auto-invoked by `modules/Foundry.psm1` after Step 8 against the prior manifest; writes `logs/redteam-trend-<stamp>.html`. Non-fatal on error.
 - **Adversarial traffic switch**: `Deploy.ps1 -AdversarialTraffic` invokes `scripts/attack_agents.py` (legacy agent-thread path) after agents deploy and writes `logs/attack_<stamp>.json`. Generates real alerts in Defender XDR / Purview / Foundry evaluators — opt-in only, lab tenants only.
@@ -206,7 +214,7 @@ Exceptions: `Prerequisites.psm1`, `Logging.psm1`, `Interactive.psm1`, and `Found
 - **AI Red Teaming**: Runs as Step 8 in Deploy-Foundry (after evaluations). Uses Microsoft's AI Red Teaming Agent (PyRIT-backed) to probe deployed agents for content safety risks, prompt injection, jailbreak, encoding bypasses, and more. Local mode sends adversarial prompts through transient Foundry threads (cleaned up after each probe). Cloud mode uses Foundry eval API with taxonomy-driven agentic risk testing. `azure-ai-evaluation[redteam]` is an optional dependency (separate `requirements-redteam.txt`). Cloud mode requires a supported region (East US 2, France Central, Sweden Central, Switzerland West, North Central US); falls back to local on unsupported regions.
 - **Logging**: All output goes through `Write-LabLog` (Level: Info/Warning/Error/Success) and `Write-LabStep` for visual sections. Transcripts auto-cleanup after 30 days.
 
-### Post-deploy manual steps (v0.11.0+)
+### Post-deploy manual steps (v0.11.0+, current as of v0.20.0)
 
 Most post-deploy items are now automated. See
 [`docs/post-deploy-steps.md`](docs/post-deploy-steps.md) for the full
@@ -249,9 +257,9 @@ az policy exemption create \
 `properties.displayName`. See `Deploy-FoundryBicep` in
 `modules/FoundryInfra.psm1`.
 
-**Region.** Tested in `eastus`. Earlier attempts in `eastus2` and `centralus`
-hit either capacity (`InsufficientResourcesAvailable`) or project-RP
-errors.
+**Region.** Tested in `eastus2` (current default). Earlier attempts in
+`eastus` and `centralus` hit either capacity
+(`InsufficientResourcesAvailable`) or project-RP errors.
 
 **Project connections are ARM resources.** Use the ARM control-plane path
 `Microsoft.CognitiveServices/accounts/projects/connections` for
@@ -419,8 +427,10 @@ authorizes it — hooks are load-bearing (catch real CI failures locally).
 Every push to `main` gets a new GitHub release with a version tag
 (`v<major>.<minor>.<patch>`) and markdown bullet release notes. Use
 `gh release create vX.Y.Z --title "vX.Y.Z — <headline>" --notes "..."`
-with manual notes; never `--generate-notes`. Current version: **v0.11.0**
-(Security-Triage demo + a2a re-enable + redteam trend HTML).
+with manual notes; never `--generate-notes`. Current version: **v0.20.0**
+(local `Deploy.ps1` is the only supported deploy path; the prior
+`deploy-foundry` GitHub Actions workflow was retired in favor of the
+device-code/local flow).
 
 ## Post-push CI watch (automatic)
 

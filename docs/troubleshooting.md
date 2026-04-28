@@ -476,7 +476,7 @@ of the deploy or the role assignment failed, grant manually:
 
 ```bash
 USER_ID=$(az ad signed-in-user show --query id -o tsv)
-SEARCH_ID=$(az search service show -n aisec-search-eastus -g rg-ai-agent-security --query id -o tsv)
+SEARCH_ID=$(az search service show -n aisec-search -g rg-ai-agent-security --query id -o tsv)
 az role assignment create --assignee-object-id $USER_ID --assignee-principal-type User \
   --role "Search Service Contributor"     --scope $SEARCH_ID
 az role assignment create --assignee-object-id $USER_ID --assignee-principal-type User \
@@ -516,7 +516,7 @@ the service in key-only mode.
 **Fix.**
 
 ```bash
-az search service update -n aisec-search-eastus -g rg-ai-agent-security \
+az search service update -n aisec-search -g rg-ai-agent-security \
   --aad-auth-failure-mode http401 --auth-options aadOrApiKey
 ```
 
@@ -546,7 +546,7 @@ HTTP 400 (`API version not supported`) or 404.
   surfaced as `ManagedAzureSearch` indexes.
 - **Connected resources → Azure AI Search** — one connection
   `AISec-ai-search`.
-- **Azure portal → AI Search → `aisec-search-eastus` → Indexes** —
+- **Azure portal → AI Search → `aisec-search` → Indexes** —
   one index `aisec-compliance-index` with 12 docs.
 
 **Fix (optional).** If you want the Foundry IQ tab populated for a

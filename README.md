@@ -53,13 +53,13 @@ tenant-specific fields above to get a working deploy.
 ## Deployment modes
 
 ```powershell
-# Full deployment: Foundry agents + labels + CA + MDCA
+# Full deployment: Foundry agents + AI Gateway + AgentIdentity + CA + MDCA
 ./Deploy.ps1 -ConfigPath config.json
 
-# Labeling + identity only: skip Foundry
+# Identity / CA / MDCA only: skip Foundry + AI Gateway
 ./Deploy.ps1 -ConfigPath config.json -SkipFoundry
 
-# Foundry only: skip labeling and adjacent identity workloads
+# Foundry only: skip identity/CA/MDCA workloads
 ./Deploy.ps1 -ConfigPath config.json -FoundryOnly
 
 # AI Gateway only: provisions APIM against existing Foundry; ~30 min
@@ -68,33 +68,6 @@ tenant-specific fields above to get a working deploy.
 # Dry run: validate config and show what would be deployed (no cloud connection)
 ./Deploy.ps1 -ConfigPath config.json -SkipAuth -WhatIf
 ```
-
-### GitHub Actions (OIDC, no laptop required)
-
-For Foundry-only deploys without setting up pwsh / Az / Python locally,
-use the [`Deploy Foundry (OIDC)`](.github/workflows/deploy-foundry.yml)
-workflow. It runs `Deploy.ps1 -FoundryOnly` against your subscription
-using federated credentials — zero stored secrets.
-
-**Setup (one-time):**
-
-1. Create an Entra app registration (or user-assigned managed identity)
-   and grant it the roles in
-   [`.github/workflows/deploy-foundry.yml`](.github/workflows/deploy-foundry.yml)
-   (Contributor + User Access Administrator + Cognitive Services
-   Contributor + Search Service / Index Data Contributor).
-2. Add a federated credential trusting your fork + this workflow —
-   see [Microsoft docs](https://learn.microsoft.com/azure/developer/github/connect-from-azure-openid-connect).
-3. In repo Settings → Secrets and variables → Actions, set the
-   variables `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`,
-   `AZURE_SUBSCRIPTION_ID`.
-4. Run the workflow from the Actions tab → Deploy Foundry (OIDC) →
-   Run workflow, providing the tenant domain and publisher UPN.
-
-Teams catalog publish is gracefully skipped in this path (it needs
-interactive Graph admin consent). Conditional Access / MDCA / EXO
-labels are also skipped — run those locally with the standard
-`./Deploy.ps1` flow.
 
 ### Interactive mode
 
@@ -123,7 +96,7 @@ standard scripts with no additional logic:
   - `azure-ai-projects` >= 2.0.0
   - `azure-identity` >= 1.15.0
   - `requests` >= 2.31.0
-- Required Entra roles: Compliance Administrator (for labels), User Administrator
+- Required Entra roles: User Administrator (testUsers), Conditional Access Administrator (CA policies), Cloud App Security Administrator (MDCA)
 
 ### Graph auth for managed identities
 
@@ -229,8 +202,9 @@ Each workload under `workloads` has an `enabled` boolean. Set to `false` to skip
 
 ## Agents
 
-The Foundry workload deploys 5 agents. Each agent's tools are auto-derived
-for RBAC assignment by the `agentIdentity` workload.
+The Foundry workload deploys 6 agents (5 user-facing + 1 routing
+orchestrator). Each agent's tools are auto-derived for RBAC assignment
+by the `agentIdentity` workload.
 
 | Agent | Tools |
 |---|---|
@@ -239,8 +213,15 @@ for RBAC assignment by the `agentIdentity` workload.
 | IT-Support | `code_interpreter`, `file_search`, `azure_ai_search`, `openapi`, `mcp`, `a2a`* |
 | Sales-Research | `code_interpreter`, `file_search`, `bing_grounding`, `image_generation`, `a2a`* |
 | Security-Triage | `openapi` (Graph Security API), `code_interpreter` |
+| Concierge | `connected_agent` × 5 (one per user-facing agent) |
 
 \* `a2a` (agent-to-agent) requires `workloads.foundry.connections.a2a` in config so an Agent2Agent project connection is provisioned and wired into the `a2a_preview` tool via `project_connection_id`.
+
+The **Concierge** is a routing orchestrator — it exposes the five
+user-facing agents through `connected_agent` tools so a single chat
+surface can fan out to the right specialist. Created as a delta-apply
+step (`scripts/create_concierge.py`) after the other agents are live;
+skipped automatically if any target is missing.
 
 ## AI Red Teaming
 
