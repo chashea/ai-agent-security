@@ -227,34 +227,56 @@ try {
     # Connect to services
     if (-not $SkipAuth) {
         if ([string]::IsNullOrWhiteSpace($TenantId)) {
-            # Resolution order:
-            #   1. Active `az login` tenant (most recent explicit user choice)
-            #   2. Active Az PowerShell context tenant
-            #   3. OIDC discovery from $Config.domain (no auth required)
-            $azCliTenant = $null
-            try {
-                $azCliTenant = (az account show --query tenantId -o tsv 2>$null).Trim()
+            # Resolution order — the *Foundry subscription's* home tenant
+            # always wins over az's default subscription tenant, because the
+            # default can drift between commercial and GCC.
+            #   1. Tenant of $Config.workloads.foundry.subscriptionId, looked
+            #      up via `az account list` (canonical: matches what we deploy to)
+            #   2. Active `az login` default tenant
+            #   3. Active Az PowerShell context tenant
+            #   4. OIDC discovery from $Config.domain (no auth required)
+            $foundrySubId = $null
+            if ($Config.workloads.PSObject.Properties['foundry'] -and
+                $Config.workloads.foundry.PSObject.Properties['subscriptionId']) {
+                $foundrySubId = [string]$Config.workloads.foundry.subscriptionId
             }
-            catch { $azCliTenant = $null }
 
-            if (-not [string]::IsNullOrWhiteSpace($azCliTenant)) {
-                $TenantId = $azCliTenant
-                Write-LabLog -Message "TenantId not provided — using active 'az login' tenant: $TenantId" -Level Info
-            }
-            else {
-                $azPsContext = $null
-                try { $azPsContext = Get-AzContext -ErrorAction SilentlyContinue } catch { $azPsContext = $null }
-                if ($azPsContext -and $azPsContext.Tenant -and -not [string]::IsNullOrWhiteSpace($azPsContext.Tenant.Id)) {
-                    $TenantId = [string]$azPsContext.Tenant.Id
-                    Write-LabLog -Message "TenantId not provided — using active Az PowerShell context tenant: $TenantId" -Level Info
+            if (-not [string]::IsNullOrWhiteSpace($foundrySubId) -and $foundrySubId -notmatch '^<.*>$') {
+                $subTenant = $null
+                try {
+                    $subTenant = (az account list --all --query "[?id=='$foundrySubId'].tenantId | [0]" -o tsv 2>$null).Trim()
                 }
-                elseif (-not [string]::IsNullOrWhiteSpace($Config.domain)) {
-                    Write-LabLog -Message "TenantId not provided — resolving from domain '$($Config.domain)' via OIDC discovery." -Level Info
-                    $TenantId = Resolve-LabTenantIdFromDomain -Domain $Config.domain
-                    Write-LabLog -Message "Resolved TenantId: $TenantId" -Level Info
+                catch { $subTenant = $null }
+
+                if (-not [string]::IsNullOrWhiteSpace($subTenant)) {
+                    $TenantId = $subTenant
+                    Write-LabLog -Message "TenantId not provided — resolved from foundry subscription $foundrySubId : $TenantId" -Level Info
+                }
+            }
+
+            if ([string]::IsNullOrWhiteSpace($TenantId)) {
+                $azCliTenant = $null
+                try { $azCliTenant = (az account show --query tenantId -o tsv 2>$null).Trim() } catch { $azCliTenant = $null }
+
+                if (-not [string]::IsNullOrWhiteSpace($azCliTenant)) {
+                    $TenantId = $azCliTenant
+                    Write-LabLog -Message "TenantId not provided — using active 'az login' default tenant: $TenantId" -Level Info
                 }
                 else {
-                    throw 'TenantId is required when authentication is enabled. Run `az login` first, pass -TenantId, or set PURVIEW_TENANT_ID.'
+                    $azPsContext = $null
+                    try { $azPsContext = Get-AzContext -ErrorAction SilentlyContinue } catch { $azPsContext = $null }
+                    if ($azPsContext -and $azPsContext.Tenant -and -not [string]::IsNullOrWhiteSpace($azPsContext.Tenant.Id)) {
+                        $TenantId = [string]$azPsContext.Tenant.Id
+                        Write-LabLog -Message "TenantId not provided — using active Az PowerShell context tenant: $TenantId" -Level Info
+                    }
+                    elseif (-not [string]::IsNullOrWhiteSpace($Config.domain)) {
+                        Write-LabLog -Message "TenantId not provided — resolving from domain '$($Config.domain)' via OIDC discovery." -Level Info
+                        $TenantId = Resolve-LabTenantIdFromDomain -Domain $Config.domain
+                        Write-LabLog -Message "Resolved TenantId: $TenantId" -Level Info
+                    }
+                    else {
+                        throw 'TenantId is required when authentication is enabled. Run `az login` first, pass -TenantId, or set PURVIEW_TENANT_ID.'
+                    }
                 }
             }
         }
