@@ -64,10 +64,9 @@ jobs:
         id: apim
         run: |
           set -euo pipefail
-          KEY=$(az apim subscription show \
-            --resource-group "$RG" \
-            --service-name "$APIM" \
-            --subscription-id-key "$STARTER_SUB_ID" \
+          SUB_ID="${{ secrets.AZURE_SUBSCRIPTION_ID }}"
+          KEY=$(az rest --method post \
+            --uri "https://management.azure.com/subscriptions/${SUB_ID}/resourceGroups/${RG}/providers/Microsoft.ApiManagement/service/${APIM}/subscriptions/${STARTER_SUB_ID}/listSecrets?api-version=2022-08-01" \
             --query primaryKey -o tsv)
           if [[ -z "$KEY" || "$KEY" == "null" ]]; then
             echo "::error::Could not retrieve APIM subscription key for $STARTER_SUB_ID"
